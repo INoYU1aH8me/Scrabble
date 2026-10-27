@@ -68,6 +68,7 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
 .tile.blank .tl { color: var(--blank-ink); }
 .tile.pending { box-shadow: inset 0 -2px 0 var(--tile-edge), 0 0 0 2px var(--brass); }
 .tile.last { box-shadow: inset 0 -2px 0 var(--tile-edge), inset 0 0 0 2px var(--brass); }
+.tile.vote { opacity: .8; box-shadow: inset 0 -2px 0 var(--tile-edge), 0 0 0 2px var(--danger); }
 
 /* board */
 .board-frame { background: var(--felt); padding: 1.4%; border-radius: 14px; box-shadow: var(--shadow); container-type: inline-size; }
@@ -105,8 +106,13 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
 .pl .av { position: relative; width: 28px; height: 28px; font-size: 12px; }
 .pl .av i { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--surface); background: var(--muted); }
 .pl .av i.on { background: var(--ok); }
-.pl .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pl .nm { display: flex; flex-direction: column; min-width: 0; }
+.pl .n1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pl .n2 { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .pl .nm small { font-weight: 400; color: var(--muted); }
+.votebox { border: 2px solid var(--danger); }
+.votebox p { margin: 0; }
+.note.warn { color: var(--danger); }
 .pl .sc { font-family: var(--f-mono); font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
 .bagline { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
 .bagline b { font-family: var(--f-mono); color: var(--ink); }
@@ -201,7 +207,7 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
         <li>Первое слово должно пройти через центральную клетку ★ и состоять хотя бы из двух букв.</li>
         <li>Каждое следующее слово должно соприкасаться с уже лежащими фишками: продолжать слово, пересекать его или вставать рядом.</li>
         <li>Все слова, которые получились по горизонтали и вертикали из новых фишек, должны быть настоящими словами.</li>
-        <li>Нажмите «Сходить». Вы доберёте фишки из мешка до семи.</li>
+        <li>Нажмите «Сходить». Если все слова есть в словаре, ход засчитывается сразу и вы доберёте фишки из мешка до семи. Если какого-то слова в словаре нет, ход уходит на голосование.</li>
       </ol>
       <p>Вместо хода можно <b>обменять</b> любые фишки (пока в мешке не меньше 7) или <b>пропустить</b> ход.</p>
 
@@ -233,8 +239,17 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
         <li>Выложили все 7 фишек за один ход — плюс 50 очков.</li>
       </ul>
 
-      <h3>Оспаривание</h3>
-      <p>Если соперник выложил несуществующее слово, любой другой игрок может нажать «Оспорить ход», пока не сделан следующий ход. Фишки вернутся к автору, очки снимутся, а ход он потеряет. Спорное слово можно открыть в Викисловаре по ссылке рядом с ходом.</p>
+      <h3>Словарь и голосование</h3>
+      <ul>
+        <li>Слова сверяются со словарём из примерно 51 тысячи существительных в начальной форме (открытый список <a href="https://github.com/Harrix/Russian-Nouns" target="_blank" rel="noopener">Russian-Nouns</a>). Подсказка «Нет в словаре» появляется ещё до того, как вы сходите.</li>
+        <li>Если слова нет в словаре, фишки ложатся на поле с красной рамкой, и соперники голосуют: «Принять» или «Отклонить». Слово можно открыть в Викисловаре по ссылке.</li>
+        <li>Автор хода считается голосующим «за», решает большинство. Втроём ходу хватает одного «за» от соперников, вдвоём решает соперник.</li>
+        <li>Если слово отклонили, фишки возвращаются к автору, и он <b>ходит ещё раз</b>. Штрафов нет.</li>
+        <li>Пока идёт голосование, автор может сам забрать ход и сходить по-другому.</li>
+      </ul>
+
+      <h3>Время</h3>
+      <p>Рядом с каждым игроком видно, сколько всего времени он думал над ходами, а у того, кто ходит сейчас, ещё и время текущего хода. Пока ход на голосовании, часы стоят. Время ни на что не влияет, штрафов нет.</p>
 
       <h3>Конец партии</h3>
       <ul>
@@ -370,16 +385,48 @@ function newGameState(local) {
 }
 function dealStart(s) {
   s.bag = newBag();
-  for (const p of s.players) { p.rack = s.bag.splice(0, RACK); p.score = 0; }
+  for (const p of s.players) { p.rack = s.bag.splice(0, RACK); p.score = 0; p.time = 0; }
   s.turn = Math.floor(Math.random() * s.players.length);
-  s.status = "play"; s.board = EMPTY; s.passes = 0; s.last = null; s.log = [{t: "start", p: s.turn}];
+  s.status = "play"; s.board = EMPTY; s.passes = 0; s.last = null; s.vote = null; s.log = [{t: "start", p: s.turn}];
+  startClock(s);
+}
+// clocks only measure thinking time; nobody is penalised for it
+function stopClock(s) {
+  const p = s.players[s.turn];
+  if (s.turnStart && p) p.time = (p.time || 0) + Math.max(0, Date.now() - s.turnStart);
+  s.turnStart = null;
+}
+function startClock(s) { s.turnStart = s.status === "play" ? Date.now() : null; }
+function nextTurn(s, pi) {
+  s.turn = (pi + 1) % s.players.length;
+  startClock(s);
+}
+// a proposed move waits on the board until the other players vote on it
+function finishVote(s, ok) {
+  const V = s.vote, pi = V.p, P = s.players[pi];
+  s.vote = null;
+  const ev = ok ? evaluate(bArr(s.board), V.placed) : null;
+  if (!ok || ev.err != null) {
+    P.rack.push(...V.placed.map(p => p.t));
+    s.log.push({t: "reject", p: pi, words: V.words.map(w => w.word)});
+    startClock(s); trimLog(s);
+    return;
+  }
+  const drawn = s.bag.splice(0, Math.min(V.placed.length, s.bag.length));
+  P.rack.push(...drawn); P.score += ev.score; s.board = bStr(ev.board);
+  s.last = {p: pi, cells: V.placed.map(x => x.i), words: ev.words.map(w => w.word)};
+  s.log.push({t: "move", p: pi, words: ev.words, score: ev.score, bingo: ev.bingo});
+  s.passes = 0;
+  if (!P.rack.length && !s.bag.length) { s.turn = (pi + 1) % s.players.length; endGame(s, pi); }
+  else nextTurn(s, pi);
+  trimLog(s);
 }
 function endGame(s, outIdx) {
   const sums = s.players.map(p => p.rack.reduce((a, ch) => a + rackVal(ch), 0));
   const adj = sums.map((v, j) => (outIdx != null && j === outIdx) ? 0 : -v);
   if (outIdx != null) adj[outIdx] = sums.reduce((a, v, j) => j === outIdx ? a : a + v, 0);
   adj.forEach((d, j) => s.players[j].score += d);
-  s.status = "over";
+  s.status = "over"; s.turnStart = null; s.vote = null;
   s.log.push({t: "end", adj});
   return adj;
 }
@@ -413,6 +460,7 @@ const ACTIONS = {
   move(s, pid, a) {
     const pi = idxOf(s, pid);
     if (s.status !== "play") return "Партия не идёт";
+    if (s.vote) return "Предыдущий ход ещё на голосовании";
     if (s.turn !== pi) return "Сейчас не ваш ход";
     const placed = (a.placed || []).map(p => ({i: +p.i, ch: String(p.ch), t: String(p.t)}));
     const r2 = s.players[pi].rack.slice();
@@ -422,25 +470,44 @@ const ACTIONS = {
     }
     const ev = evaluate(bArr(s.board), placed);
     if (ev.err != null) return ev.err || "Выложите фишки";
-    const drawn = s.bag.splice(0, Math.min(placed.length, s.bag.length));
-    r2.push(...drawn);
-    s.players[pi].rack = r2; s.players[pi].score += ev.score; s.board = bStr(ev.board);
-    s.last = {p: pi, cells: placed.map(x => x.i), used: placed.map(x => x.t), drawn, score: ev.score, words: ev.words.map(w => w.word)};
-    s.log.push({t: "move", p: pi, words: ev.words, score: ev.score, bingo: ev.bingo});
-    s.passes = 0; s.turn = (pi + 1) % s.players.length;
-    if (!r2.length && !s.bag.length) s.last.endAdj = endGame(s, pi);
-    trimLog(s);
+    s.players[pi].rack = r2;
+    stopClock(s);
+    const unknown = ev.words.map(w => w.word).filter(w => !inDict(w));
+    s.vote = {p: pi, placed, words: ev.words, score: ev.score, bingo: ev.bingo, unknown, votes: {}};
+    if (!unknown.length) finishVote(s, true);
+  },
+  vote(s, pid, a) {
+    const V = s.vote; if (!V) return "Голосование уже закончилось";
+    if (s.local) { finishVote(s, !!a.ok); return; }
+    const pi = idxOf(s, pid);
+    if (pi < 0) return "Голосуют только игроки за столом";
+    if (pi === V.p) return "За свой ход голосовать нельзя";
+    V.votes[pid] = !!a.ok;
+    // the author counts as a vote for; a strict majority decides, a tie keeps the move
+    const others = s.players.length - 1;
+    const yes = Object.values(V.votes).filter(v => v).length, no = Object.values(V.votes).filter(v => !v).length;
+    if (no * 2 > others) finishVote(s, false);
+    else if (yes * 2 >= others) finishVote(s, true);
+  },
+  withdraw(s, pid) {
+    const V = s.vote; if (!V) return "Голосование уже закончилось";
+    if (!s.local && idxOf(s, pid) !== V.p) return "Забрать ход может только его автор";
+    s.players[V.p].rack.push(...V.placed.map(p => p.t));
+    s.vote = null; startClock(s);
   },
   pass(s, pid) {
     const pi = idxOf(s, pid);
     if (s.status !== "play" || s.turn !== pi) return "Сейчас не ваш ход";
-    s.passes++; s.last = null; s.log.push({t: "pass", p: pi}); s.turn = (pi + 1) % s.players.length;
-    if (s.passes >= 2 * s.players.length) endGame(s, null);
+    if (s.vote) return "Ход на голосовании";
+    stopClock(s);
+    s.passes++; s.last = null; s.log.push({t: "pass", p: pi});
+    if (s.passes >= 2 * s.players.length) endGame(s, null); else nextTurn(s, pi);
     trimLog(s);
   },
   swap(s, pid, a) {
     const pi = idxOf(s, pid);
     if (s.status !== "play" || s.turn !== pi) return "Сейчас не ваш ход";
+    if (s.vote) return "Ход на голосовании";
     if (s.bag.length < RACK) return "В мешке меньше 7 фишек, обмен невозможен";
     const letters = (a.letters || []).map(String);
     if (!letters.length) return "Выберите фишки для обмена";
@@ -449,25 +516,22 @@ const ACTIONS = {
     const drawn = s.bag.splice(0, letters.length);
     s.bag.push(...letters); shuffle(s.bag);
     s.players[pi].rack = r2.concat(drawn);
-    s.passes++; s.last = null; s.log.push({t: "swap", p: pi, n: letters.length}); s.turn = (pi + 1) % s.players.length;
-    if (s.passes >= 2 * s.players.length) endGame(s, null);
+    stopClock(s);
+    s.passes++; s.last = null; s.log.push({t: "swap", p: pi, n: letters.length});
+    if (s.passes >= 2 * s.players.length) endGame(s, null); else nextTurn(s, pi);
     trimLog(s);
   },
-  challenge(s, pid) {
-    const L = s.last; if (!L) return "Оспаривать нечего";
-    const pi = idxOf(s, pid);
-    if (pi < 0) return "Оспаривать могут только игроки этой партии";
-    if (!s.local && pi === L.p) return "Свой ход оспорить нельзя";
-    if (L.endAdj) { L.endAdj.forEach((d, j) => s.players[j].score -= d); s.status = "play"; s.log = s.log.filter(e => e.t !== "end"); }
-    const b = bArr(s.board); L.cells.forEach(i => b[i] = ""); s.board = bStr(b);
-    const P = s.players[L.p]; const r2 = P.rack.slice();
-    for (const d of L.drawn) { const k = r2.indexOf(d); if (k >= 0) r2.splice(k, 1); }
-    r2.push(...L.used); P.rack = r2;
-    s.bag.push(...L.drawn); shuffle(s.bag); P.score -= L.score;
-    s.log.push({t: "undo", p: pi, target: L.p, words: L.words, score: L.score});
-    s.last = null; trimLog(s);
-  },
 };
+
+// ---------- dictionary (Harrix/Russian-Nouns, MIT): nouns in nominative singular ----------
+const DICT_URL = "https://cdn.jsdelivr.net/gh/Harrix/Russian-Nouns@main/dist/russian_nouns.txt";
+let DICT = null, dictState = "loading";
+const normWord = w => String(w).toLowerCase().replace(/ё/g, "е");
+const inDict = w => !!DICT && DICT.has(normWord(w));
+fetch(DICT_URL).then(r => r.ok ? r.text() : Promise.reject(r.status)).then(t => {
+  DICT = new Set(t.split(/\r?\n/).map(x => normWord(x.trim())).filter(Boolean));
+  dictState = "ok"; render();
+}).catch(() => { dictState = "err"; render(); });
 
 // what one client may see: only their own rack
 function sanitize(s, pid) {
@@ -483,7 +547,7 @@ const PID = load("bukvoed-pid") || (() => { const v = "p" + rand(12); store("buk
 let myName = load("bukvoed-name") || "";
 let mode = null;              // host | client | local
 let room = null, peer = null, hostConn = null, conns = new Map(), online = [];
-let net = "idle", netSince = 0, rcTimer = null;
+let net = "idle", netSince = 0, rcTimer = null, clockOffset = 0;
 let G = null;
 let pending = [], sel = null, swapMode = false, swapSel = new Set(), order = [], rackKey = "";
 let revealed = false, revealTurn = -1, view = "play";
@@ -493,6 +557,21 @@ let toastTimer;
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3200); }
 function meIdx() { if (!G) return -1; if (mode === "local") return G.status === "play" ? G.turn : -1; return idxOf(G, PID); }
 const playerName = (s, j) => (s.players[j] && s.players[j].name) || ("Игрок " + (j + 1));
+const hostNow = () => Date.now() + (mode === "client" ? clockOffset : 0);
+function fmtTime(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000)), hh = Math.floor(t / 3600), mm = Math.floor(t / 60) % 60, ss = t % 60;
+  return (hh ? hh + ":" + String(mm).padStart(2, "0") : mm) + ":" + String(ss).padStart(2, "0");
+}
+function clockText(s, j) {
+  const p = s.players[j]; if (!p) return "";
+  const running = s.status === "play" && s.turn === j && s.turnStart;
+  const cur = running ? Math.max(0, hostNow() - s.turnStart) : 0;
+  return fmtTime((p.time || 0) + cur) + (running ? " · этот ход " + fmtTime(cur) : "");
+}
+setInterval(() => {
+  if (!G) return;
+  document.querySelectorAll(".clock[data-j]").forEach(el => { el.textContent = clockText(G, +el.dataset.j); });
+}, 1000);
 const roomUrl = code => location.origin + location.pathname + "?room=" + code;
 const peerOk = () => typeof window.Peer === "function";
 function setNet(v) { if (net !== v) { net = v; netSince = Date.now(); } render(); }
@@ -575,7 +654,7 @@ function onHostData(conn, d) {
 function broadcast() {
   if (mode !== "host") return;
   online = [PID, ...[...conns.values()].filter(c => c.open).map(c => c.pid)];
-  for (const c of conns.values()) if (c.open) { try { c.send({type: "state", state: sanitize(G, c.pid), online}); } catch (e) {} }
+  for (const c of conns.values()) if (c.open) { try { c.send({type: "state", state: sanitize(G, c.pid), online, now: Date.now()}); } catch (e) {} }
 }
 
 // ---------- client ----------
@@ -602,7 +681,7 @@ function connectHost() {
   c.on("open", () => { c.send({type: "hello", pid: PID, name: myName}); setNet("open"); });
   c.on("data", d => {
     if (!d || typeof d !== "object") return;
-    if (d.type === "state") { G = d.state; online = d.online || []; render(); }
+    if (d.type === "state") { G = d.state; online = d.online || []; if (d.now) clockOffset = d.now - Date.now(); render(); }
     else if (d.type === "res") { const r = reqs.get(d.id); if (r) { reqs.delete(d.id); if (d.err) toast(d.err); r(!d.err); } }
   });
   c.on("close", () => { if (hostConn === c) { setNet("lost"); retry(connectHost, 3000); } });
@@ -747,12 +826,13 @@ function boardEl(boardS, interactive) {
   const b = bArr(boardS);
   const pend = new Map(interactive ? pending.map(p => [p.i, p]) : []);
   const lastSet = new Set(interactive && G && G.last ? G.last.cells : []);
+  const voteMap = voteCells();
   const grid = h("div", {class: "board" + (interactive ? "" : " static"), "aria-label": "Игровое поле"});
   for (let i = 0; i < 225; i++) {
-    const pr = prem(i), ch = b[i], p = pend.get(i);
+    const pr = prem(i), ch = b[i] || (interactive ? voteMap.get(i) : ""), p = pend.get(i);
     const label = (ch ? ch.toUpperCase() : p ? p.ch.toUpperCase() : "пусто") + ", ряд " + (Math.floor(i / N) + 1) + ", столбец " + (i % N + 1);
     const cell = h(interactive ? "button" : "div", {class: "cell" + (pr ? " p-" + pr : ""), "data-i": i, type: interactive ? "button" : null, "aria-label": interactive ? label : null, tabindex: interactive && ch ? "-1" : null});
-    if (ch) cell.append(tileEl(ch, lastSet.has(i) ? "last" : ""));
+    if (ch) cell.append(tileEl(ch, voteMap.has(i) && !b[i] ? "vote" : lastSet.has(i) ? "last" : ""));
     else if (p) { const t = tileEl(p.ch, "pending"); t.draggable = true; t.dataset.drag = "p:" + i; cell.append(t); }
     else if (pr) cell.append(h("span", {class: "plabel"}, PLBL[pr]));
     grid.append(cell);
@@ -760,7 +840,7 @@ function boardEl(boardS, interactive) {
   if (!interactive) return h("div", {class: "board-frame"}, grid);
   grid.addEventListener("click", e => { const c = e.target.closest(".cell"); if (c) onCell(+c.dataset.i); });
   grid.addEventListener("dragstart", e => { const t = e.target.closest("[data-drag]"); if (t) e.dataTransfer.setData("text/plain", t.dataset.drag); });
-  grid.addEventListener("dragover", e => { const c = e.target.closest(".cell"); if (c && !bArr(G.board)[+c.dataset.i]) { e.preventDefault(); c.classList.add("drop"); } });
+  grid.addEventListener("dragover", e => { const c = e.target.closest(".cell"); if (c && !bArr(G.board)[+c.dataset.i] && !voteMap.has(+c.dataset.i)) { e.preventDefault(); c.classList.add("drop"); } });
   grid.addEventListener("dragleave", e => { const c = e.target.closest(".cell"); if (c) c.classList.remove("drop"); });
   grid.addEventListener("drop", e => {
     const c = e.target.closest(".cell"); if (!c) return; e.preventDefault();
@@ -771,16 +851,18 @@ function boardEl(boardS, interactive) {
   return h("div", {class: "board-frame"}, grid);
 }
 
+function voteCells() { return new Map(G && G.vote ? G.vote.placed.map(p => [p.i, p.ch]) : []); }
 function onCell(i) {
   if (!G || G.status !== "play" || meIdx() < 0) return;
-  if (bArr(G.board)[i]) return;
+  if (bArr(G.board)[i] || voteCells().has(i)) return;
+  if (G.vote && G.vote.p === meIdx()) { toast("Ваш ход на голосовании"); return; }
   const k = pending.findIndex(p => p.i === i);
   if (k >= 0) { pending.splice(k, 1); render(); return; }
   if (sel == null) { toast("Сначала выберите фишку внизу"); return; }
   placeAt(i);
 }
 function placeAt(i) {
-  if (sel == null || pending.some(p => p.i === i) || bArr(G.board)[i]) return;
+  if (sel == null || pending.some(p => p.i === i) || bArr(G.board)[i] || voteCells().has(i)) return;
   const r = sel, ch = myRack()[r]; sel = null;
   if (ch == null || ch === "?" || pending.some(p => p.r === r)) return;
   if (ch === "*") { openBlankPicker(i, r); return; }
@@ -830,6 +912,7 @@ function tableView() {
   if (s.status === "lobby") side.append(seatsPanel(s));
   else {
     if (s.status === "over") side.append(finalPanel(s));
+    if (s.status === "play" && s.vote) side.append(votePanel(s, mi));
     side.append(playersPanel(s, mi));
     if (s.status === "play" && mi >= 0) side.append(rackPanel(s, mi, myTurn));
     else if (s.status === "play") side.append(h("div", {class: "panel note"}, "Вы наблюдаете за партией: все места заняты."));
@@ -859,7 +942,7 @@ function seatsPanel(s) {
   for (let j = 0; j < MAXP; j++) {
     const p = s.players[j];
     seats.append(h("div", {class: "pl"}, p ? avatar(s, j) : h("span", {}),
-      h("span", {class: "nm"}, p ? playerName(s, j) : h("small", {}, "свободное место"), p && p.id === s.host ? h("small", {}, " · хозяин") : null, p && p.id === PID ? h("small", {}, " · вы") : null), h("span", {})));
+      h("span", {class: "nm"}, h("span", {class: "n1"}, p ? playerName(s, j) : h("small", {}, "свободное место"), p && p.id === s.host ? h("small", {}, " · хозяин") : null, p && p.id === PID ? h("small", {}, " · вы") : null)), h("span", {})));
   }
   const box = h("div", {class: "panel stack"}, h("h3", {}, "За столом " + s.players.length + " из 3"), seats);
   if (!mine && s.players.length < MAXP) {
@@ -878,7 +961,9 @@ function playersPanel(s, mi) {
   const list = h("div", {class: "players"});
   s.players.forEach((p, j) => list.append(h("div", {class: "pl" + (s.status === "play" && s.turn === j ? " turn" : "")},
     avatar(s, j),
-    h("span", {class: "nm"}, playerName(s, j), mode !== "local" && j === mi ? h("small", {}, " · вы") : null, h("small", {}, " · фишек: " + p.rack.length)),
+    h("span", {class: "nm"},
+      h("span", {class: "n1"}, playerName(s, j), mode !== "local" && j === mi ? h("small", {}, " · вы") : null),
+      h("span", {class: "n2"}, "фишек: " + p.rack.length + " · время ", h("span", {class: "clock", "data-j": j}, clockText(s, j)))),
     h("span", {class: "sc"}, p.score))));
   return h("div", {class: "panel stack"}, list, h("div", {class: "bagline"}, h("span", {}, "В мешке"), h("b", {}, s.bag.length + " фиш.")));
 }
@@ -919,6 +1004,11 @@ function rackPanel(s, mi, myTurn) {
   for (let k = rack.length; k < RACK; k++) rk.append(h("span", {class: "slot"}));
   wrap.append(rk);
 
+  if (s.vote) {
+    wrap.append(h("p", {class: "note"}, s.vote.p === mi ? "Ваш ход на голосовании. Если его не примут, фишки вернутся и вы сходите ещё раз." : "Идёт голосование. Фишки можно раскладывать, сходить получится после него."));
+    if (s.vote.p === mi) return wrap;
+  }
+
   if (swapMode) {
     wrap.append(h("p", {class: "note"}, "Отметьте фишки, которые хотите сбросить в мешок."),
       h("div", {class: "row"},
@@ -933,10 +1023,16 @@ function rackPanel(s, mi, myTurn) {
   else if (ev.err) pv.append(h("span", {class: "err"}, ev.err));
   else pv.append(h("span", {}, ev.words.map(w => w.word + " " + w.score).join(" + ") + (ev.bingo ? " + 50 за все фишки" : "") + " = "), h("span", {class: "pts"}, ev.score + " очк."));
   wrap.append(pv);
-  if (ev && !ev.err) wrap.append(dictLinks(ev.words.map(w => w.word)));
+  if (ev && !ev.err) {
+    const unknown = ev.words.map(w => w.word).filter(w => !inDict(w));
+    if (unknown.length) wrap.append(h("p", {class: "note warn"}, dictState === "ok"
+      ? "Нет в словаре: " + unknown.join(", ") + ". Ход уйдёт на голосование."
+      : dictState === "loading" ? "Словарь ещё загружается." : "Словарь не загрузился, все ходы идут на голосование."));
+    wrap.append(dictLinks(ev.words.map(w => w.word)));
+  }
 
   wrap.append(h("div", {class: "row"},
-    h("button", {class: "btn primary", type: "button", onclick: doMove, disabled: !myTurn || !ev || !!ev.err}, "Сходить"),
+    h("button", {class: "btn primary", type: "button", onclick: doMove, disabled: !myTurn || !!s.vote || !ev || !!ev.err}, "Сходить"),
     h("button", {class: "btn", type: "button", onclick: () => { pending = []; sel = null; render(); }, disabled: !pending.length}, "Вернуть фишки"),
     h("button", {class: "btn", type: "button", onclick: () => { pending = []; sel = null; shuffle(order); render(); }}, "Перемешать")));
   wrap.append(h("div", {class: "row"},
@@ -945,21 +1041,38 @@ function rackPanel(s, mi, myTurn) {
   return wrap;
 }
 
+function votePanel(s, mi) {
+  const V = s.vote, who = playerName(s, V.p);
+  const box = h("div", {class: "panel stack votebox"}, h("h3", {}, "Голосование"),
+    h("p", {}, who + " предлагает: ", h("b", {}, V.words.map(w => w.word + " " + w.score).join(", ")), " — " + V.score + " очк." + (V.bingo ? " (все 7 фишек)" : "")),
+    h("p", {class: "note warn"}, (V.unknown && V.unknown.length ? "Нет в словаре: " + V.unknown.join(", ") : "Словарь не загрузился у хозяина стола") + ". Это настоящее слово?"),
+    dictLinks(V.unknown && V.unknown.length ? V.unknown : V.words.map(w => w.word)));
+  const yesNo = () => h("div", {class: "row"},
+    h("button", {class: "btn primary", type: "button", onclick: () => act("vote", {ok: true})}, "Принять"),
+    h("button", {class: "btn danger", type: "button", onclick: () => act("vote", {ok: false})}, "Отклонить"));
+  if (s.local) {
+    box.append(yesNo(), h("p", {class: "note"}, "Решите вслух. Если слово отклонить, фишки вернутся и игрок сходит ещё раз."));
+    return box;
+  }
+  if (mi === V.p) box.append(h("p", {class: "note"}, "Ждём решения соперников."), h("div", {class: "row"}, h("button", {class: "btn small", type: "button", onclick: () => act("withdraw")}, "Забрать ход")));
+  else if (mi >= 0) {
+    const my = V.votes[PID];
+    box.append(my == null ? yesNo() : h("p", {class: "note"}, "Ваш голос: " + (my ? "принять" : "отклонить") + ". Ждём остальных."));
+  }
+  box.append(h("p", {class: "note"}, s.players.map((p, j) => j === V.p ? null : playerName(s, j) + ": " + (V.votes[p.id] == null ? "ещё не решил(а)" : V.votes[p.id] ? "за" : "против")).filter(Boolean).join(" · ")));
+  return box;
+}
+
 function logPanel(s, mi) {
   const wrap = h("div", {class: "panel stack"}, h("h3", {}, "Ходы"));
-  const L = s.last;
-  if (L && (mode === "local" || (mi >= 0 && mi !== L.p))) {
-    wrap.append(h("div", {class: "stack"},
-      h("span", {class: "note"}, "Последний ход " + playerName(s, L.p) + ": " + L.words.join(", ") + ". Не согласны со словом?"),
-      dictLinks(L.words),
-      h("div", {class: "row"}, h("button", {class: "btn small danger", type: "button", onclick: () => act("challenge")}, "Оспорить ход"))));
-  }
+  if (s.last && s.last.words) wrap.append(dictLinks(s.last.words));
   const list = h("div", {class: "log"});
   for (const e of s.log.slice().reverse()) {
     const who = e.p != null ? playerName(s, e.p) : "";
     if (e.t === "move") list.append(h("div", {class: "e"}, h("span", {}, who + ": ", h("span", {class: "w"}, e.words.map(w => w.word).join(", ")), e.bingo ? " (все 7!)" : ""), h("span", {class: "p"}, "+" + e.score)));
     else if (e.t === "pass") list.append(h("div", {class: "e"}, h("span", {}, who + " пропускает ход"), h("span", {class: "p"}, "0")));
     else if (e.t === "swap") list.append(h("div", {class: "e"}, h("span", {}, who + " меняет фишки: " + e.n), h("span", {class: "p"}, "0")));
+    else if (e.t === "reject") list.append(h("div", {class: "e undo"}, h("span", {}, "Не приняли слово " + who + ": " + e.words.join(", ") + ", ход повторяется"), h("span", {class: "p"}, "0")));
     else if (e.t === "undo") list.append(h("div", {class: "e undo"}, h("span", {}, who + ": оспорен ход игрока " + playerName(s, e.target) + " — " + e.words.join(", ")), h("span", {class: "p"}, "−" + e.score)));
     else if (e.t === "end") list.append(h("div", {class: "e"}, h("span", {}, "Конец партии, расчёт за оставшиеся фишки"), h("span", {class: "p"}, e.adj.map(d => (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d)).join(" / "))));
     else if (e.t === "start") list.append(h("div", {class: "e"}, h("span", {}, "Партия началась, первым ходит " + who), h("span", {})));
