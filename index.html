@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Буквоед</title>
+<meta name="description" content="Игра в слова из фишек с буквами на троих: поле 15×15, русские слова, игра по ссылке без регистрации.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: felt board on the left, a narrow "scorekeeper" column on the right; stacks on phones. */
+:root {
+  --bg: #e8ece4; --surface: #f7f9f4; --ink: #18201c; --muted: #5a675f; --line: #cdd5cb;
+  --felt: #2c4a3d; --felt-cell: #36584a; --plabel: #f3f6f1;
+  --w3: #b9434c; --w2: #d48a8b; --l3: #3c6bab; --l2: #7ea6cf;
+  --tile: #f1e3c2; --tile-edge: #cdb684; --tile-ink: #2b2117; --blank-ink: #9a5b22;
+  --accent: #2c4a3d; --accent-ink: #f7f9f4; --brass: #c48a1f; --danger: #a8323b; --ok: #2f7d4f;
+  --shadow: 0 1px 0 rgba(0,0,0,.08), 0 8px 24px -12px rgba(20,40,30,.35);
+  --f-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --f-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #121815; --surface: #1a221e; --ink: #e4eae5; --muted: #93a199; --line: #2d3933;
+  --felt: #1d3329; --felt-cell: #264337; --plabel: #eef2ee;
+  --w3: #b4404a; --w2: #a8686c; --l3: #3a63a0; --l2: #5a82aa;
+  --tile: #eadbb8; --tile-edge: #b59d6c;
+  --accent: #d9a43a; --accent-ink: #1a1408; --brass: #e0ab43; --danger: #e8737b; --ok: #64c48f;
+  --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 28px -14px rgba(0,0,0,.7);
+  color-scheme: dark;
+} }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5; }
+button, input { font: inherit; color: inherit; }
+a { color: inherit; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 18px 48px; }
+
+/* header */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-bottom: 18px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-tiles { display: flex; gap: 3px; }
+.brand-tiles .tile { width: 30px; height: 30px; font-size: 15px; }
+.brand h1 { font-family: var(--f-display); font-weight: 700; font-size: 22px; letter-spacing: .01em; margin: 0; }
+.brand p { margin: 0; color: var(--muted); font-size: 13px; }
+.tabs { display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+.tabs button { border: 0; background: transparent; padding: 7px 16px; border-radius: 999px; cursor: pointer; font-weight: 600; color: var(--muted); }
+.tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+.tabs button:focus-visible, .btn:focus-visible, .cell:focus-visible, .rack .tile:focus-visible, .field:focus-visible { outline: 3px solid var(--brass); outline-offset: 2px; }
+
+/* controls */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); padding: 8px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; text-decoration: none; }
+.btn:hover:not(:disabled) { border-color: var(--muted); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.danger { color: var(--danger); }
+.btn.small { padding: 5px 10px; font-size: 13px; border-radius: 8px; }
+.field { width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.field.code { font-family: var(--f-mono); text-transform: uppercase; letter-spacing: .1em; }
+label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+
+/* tiles */
+.tile { position: relative; display: grid; place-items: center; width: 100%; height: 100%; background: var(--tile); color: var(--tile-ink); border-radius: 12%; box-shadow: inset 0 -2px 0 var(--tile-edge), 0 1px 2px rgba(0,0,0,.25); font-family: var(--f-display); font-weight: 700; line-height: 1; user-select: none; }
+.tile .tv { position: absolute; right: 9%; bottom: 7%; font-family: var(--f-mono); font-weight: 700; font-size: .42em; opacity: .8; }
+.tile.blank .tl { color: var(--blank-ink); }
+.tile.pending { box-shadow: inset 0 -2px 0 var(--tile-edge), 0 0 0 2px var(--brass); }
+.tile.last { box-shadow: inset 0 -2px 0 var(--tile-edge), inset 0 0 0 2px var(--brass); }
+
+/* board */
+.board-frame { background: var(--felt); padding: 1.4%; border-radius: 14px; box-shadow: var(--shadow); container-type: inline-size; }
+.board { display: grid; grid-template-columns: repeat(15, 1fr); gap: 2px; aspect-ratio: 1; max-width: 100%; }
+.cell { position: relative; border: 0; padding: 1px; margin: 0; background: var(--felt-cell); border-radius: 3px; aspect-ratio: 1; cursor: pointer; font-size: 4.3cqi; display: grid; place-items: stretch; min-width: 0; }
+.cell .plabel { display: grid; place-items: center; font-family: var(--f-mono); font-weight: 700; font-size: .5em; color: var(--plabel); letter-spacing: .02em; }
+.cell.p-W3 { background: var(--w3); } .cell.p-W2, .cell.p-ST { background: var(--w2); }
+.cell.p-L3 { background: var(--l3); } .cell.p-L2 { background: var(--l2); }
+.cell.p-ST .plabel { font-size: .8em; }
+.cell.drop { outline: 2px dashed var(--brass); outline-offset: -2px; }
+.board.static .cell { cursor: default; }
+.cell .tile { font-size: 1em; }
+
+/* landing */
+.lobby { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 28px; align-items: start; }
+.lobby h2 { font-family: var(--f-display); font-weight: 500; font-size: 26px; line-height: 1.2; margin: 0 0 10px; text-wrap: balance; }
+.lede { color: var(--muted); max-width: 52ch; margin: 0 0 18px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+.panel h3 { font-family: var(--f-display); font-weight: 500; font-size: 15px; margin: 0; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row > .field { flex: 1 1 140px; width: auto; }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+.chip { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.chip.wait { color: var(--brass); } .chip.play { color: var(--ok); } .chip.over { color: var(--muted); } .chip.bad { color: var(--danger); }
+.demo { max-width: 460px; }
+
+/* table */
+.table { display: grid; grid-template-columns: minmax(0, 640px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.tbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.players, .seats { display: flex; flex-direction: column; gap: 6px; }
+.pl { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid transparent; }
+.pl.turn { border-color: var(--brass); background: color-mix(in srgb, var(--brass) 10%, transparent); }
+.pl .av { position: relative; width: 28px; height: 28px; font-size: 12px; }
+.pl .av i { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--surface); background: var(--muted); }
+.pl .av i.on { background: var(--ok); }
+.pl .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pl .nm small { font-weight: 400; color: var(--muted); }
+.pl .sc { font-family: var(--f-mono); font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+.bagline { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+.bagline b { font-family: var(--f-mono); color: var(--ink); }
+.rack { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 10px; background: var(--felt); border-radius: 12px; }
+.rack .slot { aspect-ratio: 1; border-radius: 12%; background: var(--felt-cell); }
+.rack .tile { border: 0; cursor: pointer; font-size: clamp(18px, 5.5vw, 24px); aspect-ratio: 1; padding: 0; }
+.rack .tile.sel { transform: translateY(-5px); box-shadow: inset 0 -2px 0 var(--tile-edge), 0 0 0 3px var(--brass); }
+.rack .tile.swap { opacity: .55; outline: 3px solid var(--danger); }
+.cover { display: grid; place-items: center; text-align: center; gap: 8px; padding: 18px; background: var(--felt); color: var(--plabel); border-radius: 12px; }
+.preview { font-size: 14px; min-height: 22px; }
+.preview .err { color: var(--danger); }
+.preview .pts { font-family: var(--f-mono); font-weight: 700; }
+.dict { font-size: 13px; color: var(--muted); }
+.dict a { margin-right: 8px; }
+.log { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; font-size: 13px; }
+.log .e { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px dashed var(--line); padding-bottom: 5px; }
+.log .e .w { font-family: var(--f-display); font-weight: 500; letter-spacing: .02em; }
+.log .e.undo { color: var(--danger); }
+.log .e .p { font-family: var(--f-mono); font-weight: 700; white-space: nowrap; }
+.final { border: 2px solid var(--brass); }
+.final h3 { color: var(--brass); }
+.share { display: flex; gap: 8px; }
+.share input { flex: 1 1 auto; min-width: 0; font-family: var(--f-mono); font-size: 13px; }
+
+/* overlay */
+.overlay { position: fixed; inset: 0; background: rgba(10,16,13,.55); display: grid; place-items: center; z-index: 30; padding: 16px; }
+.picker { background: var(--surface); border-radius: 14px; padding: 18px; max-width: 420px; width: 100%; }
+.picker .grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-block: 12px; }
+.picker .grid button { aspect-ratio: 1; border: 0; padding: 0; cursor: pointer; font-size: 18px; }
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-weight: 500; z-index: 40; max-width: calc(100% - 32px); }
+
+/* rules */
+.rules { max-width: 760px; }
+.rules h2 { font-family: var(--f-display); font-weight: 500; font-size: 26px; margin: 0 0 6px; }
+.rules h3 { font-family: var(--f-display); font-weight: 500; font-size: 17px; margin: 28px 0 8px; }
+.rules p, .rules li { max-width: 66ch; }
+.rules ul, .rules ol { padding-left: 22px; }
+.rules li { margin-bottom: 4px; }
+.lettergrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; margin-top: 10px; }
+.lg { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.lg .tile { width: 40px; height: 40px; font-size: 19px; }
+.legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 10px; }
+.legend div { display: flex; align-items: center; gap: 10px; }
+.legend i { width: 26px; height: 26px; border-radius: 4px; display: grid; place-items: center; font-style: normal; font-family: var(--f-mono); font-size: 11px; font-weight: 700; color: var(--plabel); flex: none; }
+
+@media (max-width: 900px) {
+  .table, .lobby { grid-template-columns: minmax(0, 1fr); }
+  .demo { max-width: 100%; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rack .tile { transition: transform .12s ease; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="brand-tiles" aria-hidden="true">
+        <span class="tile"><span class="tl">Б</span></span><span class="tile"><span class="tl">У</span></span><span class="tile"><span class="tl">К</span></span>
+      </div>
+      <div>
+        <h1>Буквоед</h1>
+        <p>Слова из фишек на троих, по общей ссылке</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button type="button" role="tab" id="tab-play" aria-selected="true" data-view="play">Игра</button>
+      <button type="button" role="tab" id="tab-rules" aria-selected="false" data-view="rules">Правила</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="view-play" role="tabpanel" aria-labelledby="tab-play"></section>
+
+    <section id="view-rules" class="rules" role="tabpanel" aria-labelledby="tab-rules" hidden>
+      <h2>Правила</h2>
+      <p class="note">Игра для 2–3 человек. Побеждает тот, у кого больше очков, когда фишки закончатся.</p>
+
+      <h3>Как собрать стол</h3>
+      <ol>
+        <li>Один игрок вводит имя и нажимает «Создать стол». Он становится хозяином стола.</li>
+        <li>Хозяин копирует ссылку стола и отправляет её друзьям в любой мессенджер.</li>
+        <li>Друзья открывают ссылку, вводят имя и нажимают «Сесть за стол». Регистрация не нужна.</li>
+        <li>Хозяин нажимает «Начать партию». Играть можно вдвоём или втроём.</li>
+      </ol>
+      <p>Партия хранится в браузере хозяина. <b>Хозяину нельзя закрывать вкладку</b>, пока идёт игра: остальные игроки соединяются через него. Если вкладка случайно закрылась, откройте ту же ссылку в том же браузере, и партия продолжится, а друзья переподключатся сами.</p>
+
+      <h3>Ход</h3>
+      <ol>
+        <li>Выставьте фишки на поле в одну строку или один столбец, без пропусков. Нажмите фишку внизу, затем клетку поля, или перетащите её мышью. Повторное нажатие на выставленную фишку возвращает её.</li>
+        <li>Первое слово должно пройти через центральную клетку ★ и состоять хотя бы из двух букв.</li>
+        <li>Каждое следующее слово должно соприкасаться с уже лежащими фишками: продолжать слово, пересекать его или вставать рядом.</li>
+        <li>Все слова, которые получились по горизонтали и вертикали из новых фишек, должны быть настоящими словами.</li>
+        <li>Нажмите «Сходить». Вы доберёте фишки из мешка до семи.</li>
+      </ol>
+      <p>Вместо хода можно <b>обменять</b> любые фишки (пока в мешке не меньше 7) или <b>пропустить</b> ход.</p>
+
+      <h3>Какие слова можно</h3>
+      <ul>
+        <li>Нарицательные существительные в начальной форме: именительный падеж, единственное число («кот», «окно»). Если у слова нет единственного числа, берётся множественное («ножницы», «сутки»).</li>
+        <li>Нельзя: имена и названия, аббревиатуры, сокращения, слова через дефис, другие части речи.</li>
+        <li>Буквы Е и Ё считаются одной буквой.</li>
+      </ul>
+
+      <h3>Фишки и очки</h3>
+      <p>В мешке 104 фишки. Под буквой — сколько очков она стоит и сколько таких фишек в мешке. Звёздочка — «пустышка»: ей можно назначить любую букву, но очков она не приносит.</p>
+      <div class="lettergrid" id="lettergrid"></div>
+
+      <h3>Бонусные клетки</h3>
+      <p>Бонус срабатывает только для фишки, которую положили на клетку в этом ходу.</p>
+      <div class="legend">
+        <div><i style="background:var(--l2)">Б2</i> буква × 2</div>
+        <div><i style="background:var(--l3)">Б3</i> буква × 3</div>
+        <div><i style="background:var(--w2)">С2</i> всё слово × 2</div>
+        <div><i style="background:var(--w3)">С3</i> всё слово × 3</div>
+        <div><i style="background:var(--w2)">★</i> центр, слово × 2</div>
+      </div>
+
+      <h3>Подсчёт</h3>
+      <ul>
+        <li>Очки слова — сумма его букв с учётом бонусов за буквы, затем умноженная на бонусы за слово.</li>
+        <li>Если ход образовал несколько слов, засчитываются все.</li>
+        <li>Выложили все 7 фишек за один ход — плюс 50 очков.</li>
+      </ul>
+
+      <h3>Оспаривание</h3>
+      <p>Если соперник выложил несуществующее слово, любой другой игрок может нажать «Оспорить ход», пока не сделан следующий ход. Фишки вернутся к автору, очки снимутся, а ход он потеряет. Спорное слово можно открыть в Викисловаре по ссылке рядом с ходом.</p>
+
+      <h3>Конец партии</h3>
+      <ul>
+        <li>Партия заканчивается, когда мешок пуст и кто-то выложил последнюю фишку. Он получает очки за фишки, оставшиеся у соперников, а соперники их теряют.</li>
+        <li>Также партия заканчивается, если два круга подряд никто не набрал очков (пропуски и обмены). Тогда каждый теряет очки за свои оставшиеся фишки.</li>
+      </ul>
+
+      <h3>Если не соединяется</h3>
+      <ul>
+        <li>Игроки соединяются напрямую через бесплатный сервис PeerJS. Некоторые рабочие и мобильные сети блокируют такие соединения: попробуйте другую сеть Wi-Fi или раздачу с телефона.</li>
+        <li>Проверьте, что вкладка хозяина открыта и компьютер не уснул.</li>
+        <li>Если сеть совсем не пускает, сыграйте на одном экране: кнопка «Играть на одном экране» на главной.</li>
+      </ul>
+    </section>
+  </main>
+</div>
+
+<div id="overlay-root"></div>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+(() => {
+"use strict";
+const N = 15, CENTER = 112, BINGO = 50, RACK = 7, MAXP = 3;
+const SET = {А:[8,1],Б:[2,3],В:[4,1],Г:[2,3],Д:[4,2],Е:[8,1],Ж:[1,5],З:[2,5],И:[6,1],Й:[1,4],К:[4,2],Л:[4,2],М:[3,2],Н:[5,1],О:[10,1],П:[4,2],Р:[5,1],С:[5,1],Т:[5,1],У:[4,2],Ф:[1,10],Х:[1,5],Ц:[1,5],Ч:[1,5],Ш:[1,8],Щ:[1,10],Ъ:[1,10],Ы:[2,4],Ь:[2,3],Э:[1,8],Ю:[1,8],Я:[2,3],"*":[2,0]};
+const ALPHA = Object.keys(SET).filter(k => k !== "*");
+// premium squares, one octant of the board (row <= col <= 7), mirrored to all eight
+const OCT = {"0,0":"W3","4,7":"W3","1,1":"W2","2,5":"W2","6,6":"W2","1,4":"L3","4,4":"L3","0,3":"L2","2,7":"L2","3,5":"L2","6,7":"L2","7,7":"ST"};
+const PLBL = {W3:"С3", W2:"С2", L3:"Б3", L2:"Б2", ST:"★"};
+const EMPTY = ".".repeat(225);
+const PEER_PREFIX = "bukvoed-ru-";
+const PEER_OPTS = {debug: 0, config: {iceServers: [{urls: "stun:stun.l.google.com:19302"}, {urls: "stun:global.stun.twilio.com:3478"}]}};
+
+function prem(i) {
+  const r = Math.floor(i / N), c = i % N;
+  const a = Math.min(r, 14 - r), b = Math.min(c, 14 - c);
+  return OCT[Math.min(a, b) + "," + Math.max(a, b)] || "";
+}
+const isBlankCh = ch => ch === "*" || ch !== ch.toUpperCase();
+const val = ch => (!ch || isBlankCh(ch)) ? 0 : (SET[ch] ? SET[ch][1] : 0);
+const rackVal = ch => (ch === "*" || !SET[ch]) ? 0 : SET[ch][1];
+const bArr = s => Array.from(s, x => x === "." ? "" : x);
+const bStr = a => a.map(x => x || ".").join("");
+const clone = o => JSON.parse(JSON.stringify(o));
+const $ = s => document.querySelector(s);
+function rand(n, abc) { abc = abc || "abcdefghijkmnpqrstuvwxyz23456789"; let s = ""; for (let i = 0; i < n; i++) s += abc[Math.floor(Math.random() * abc.length)]; return s; }
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function newBag() { const b = []; for (const [k, [n]] of Object.entries(SET)) for (let i = 0; i < n; i++) b.push(k); return shuffle(b); }
+function store(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "value") e.value = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) { if (k == null || k === false) continue; e.append(k.nodeType ? k : document.createTextNode(String(k))); }
+  return e;
+}
+function tileEl(ch, extra, tag) {
+  const blank = isBlankCh(ch), L = ch === "*" ? "" : ch.toUpperCase();
+  return h(tag || "span", {class: "tile" + (blank ? " blank" : "") + (extra ? " " + extra : "")},
+    h("span", {class: "tl"}, L), h("span", {class: "tv"}, blank ? "" : (SET[L] ? SET[L][1] : "")));
+}
+const dictUrl = w => "https://ru.wiktionary.org/wiki/" + encodeURIComponent(w.toLowerCase());
+function dictLinks(words) {
+  return h("div", {class: "dict"}, "Словарь: ", words.map(w => h("a", {href: dictUrl(w), target: "_blank", rel: "noopener"}, w)));
+}
+
+// ---------- move evaluation ----------
+function evaluate(board, placed) {
+  if (!placed.length) return {err: ""};
+  const B = board.slice();
+  for (const p of placed) { if (B[p.i]) return {err: "Клетка уже занята"}; B[p.i] = p.ch; }
+  const rs = placed.map(p => Math.floor(p.i / N)), cs = placed.map(p => p.i % N);
+  const sameR = rs.every(r => r === rs[0]), sameC = cs.every(c => c === cs[0]);
+  if (!sameR && !sameC) return {err: "Фишки должны стоять в одну строку или столбец"};
+  const firstMove = board.every(x => !x);
+  const at = (r, c) => (r < 0 || r > 14 || c < 0 || c > 14) ? "" : B[r * N + c];
+  let dir;
+  if (placed.length > 1) dir = sameR ? "h" : "v";
+  else { const r = rs[0], c = cs[0]; dir = (at(r, c - 1) || at(r, c + 1)) ? "h" : "v"; }
+  function wordAt(i, d) {
+    const dr = d === "v" ? 1 : 0, dc = d === "h" ? 1 : 0;
+    let r = Math.floor(i / N), c = i % N;
+    while (at(r - dr, c - dc)) { r -= dr; c -= dc; }
+    const cells = [];
+    while (at(r, c)) { cells.push(r * N + c); r += dr; c += dc; }
+    return cells;
+  }
+  const main = wordAt(placed[0].i, dir), mainSet = new Set(main);
+  if (!placed.every(p => mainSet.has(p.i))) return {err: "Между фишками не должно быть пустых клеток"};
+  const fresh = new Set(placed.map(p => p.i));
+  if (firstMove) {
+    if (!fresh.has(CENTER)) return {err: "Первое слово должно пройти через центр ★"};
+    if (placed.length < 2) return {err: "Первое слово — хотя бы две буквы"};
+  }
+  const words = [];
+  if (main.length >= 2) words.push(main);
+  const cross = dir === "h" ? "v" : "h";
+  for (const p of placed) { const w = wordAt(p.i, cross); if (w.length >= 2) words.push(w); }
+  if (!words.length) return {err: "Нужно слово хотя бы из двух букв"};
+  if (!firstMove && !words.some(w => w.some(i => !fresh.has(i)))) return {err: "Слово должно касаться фишек на поле"};
+  let total = 0; const out = [];
+  for (const w of words) {
+    let s = 0, m = 1;
+    for (const i of w) {
+      let v = val(B[i]);
+      if (fresh.has(i)) {
+        const pr = prem(i);
+        if (pr === "L2") v *= 2; else if (pr === "L3") v *= 3;
+        else if (pr === "W2" || pr === "ST") m *= 2; else if (pr === "W3") m *= 3;
+      }
+      s += v;
+    }
+    s *= m; total += s;
+    out.push({word: w.map(i => B[i].toUpperCase()).join(""), score: s});
+  }
+  const bingo = placed.length === RACK;
+  if (bingo) total += BINGO;
+  return {words: out, score: total, bingo, board: B};
+}
+
+// ---------- game rules (pure, run by the host or the local device) ----------
+function newGameState(local) {
+  return {v: 2, local: !!local, created: Date.now(), host: null, status: "lobby", players: [],
+    bag: [], board: EMPTY, turn: 0, passes: 0, log: [], last: null, seq: 0};
+}
+function dealStart(s) {
+  s.bag = newBag();
+  for (const p of s.players) { p.rack = s.bag.splice(0, RACK); p.score = 0; }
+  s.turn = Math.floor(Math.random() * s.players.length);
+  s.status = "play"; s.board = EMPTY; s.passes = 0; s.last = null; s.log = [{t: "start", p: s.turn}];
+}
+function endGame(s, outIdx) {
+  const sums = s.players.map(p => p.rack.reduce((a, ch) => a + rackVal(ch), 0));
+  const adj = sums.map((v, j) => (outIdx != null && j === outIdx) ? 0 : -v);
+  if (outIdx != null) adj[outIdx] = sums.reduce((a, v, j) => j === outIdx ? a : a + v, 0);
+  adj.forEach((d, j) => s.players[j].score += d);
+  s.status = "over";
+  s.log.push({t: "end", adj});
+  return adj;
+}
+function trimLog(s) { if (s.log.length > 80) s.log = s.log.slice(-80); }
+const idxOf = (s, pid) => s.players.findIndex(p => p.id === pid);
+const cleanName = n => String(n || "").replace(/\s+/g, " ").trim().slice(0, 20);
+
+const ACTIONS = {
+  join(s, pid, a) {
+    if (idxOf(s, pid) >= 0) return "Вы уже за столом";
+    if (s.status !== "lobby") return "Партия уже началась";
+    if (s.players.length >= MAXP) return "Все три места заняты";
+    s.players.push({id: pid, name: cleanName(a.name) || "Игрок", score: 0, rack: []});
+  },
+  leave(s, pid) {
+    if (s.status !== "lobby") return "Партия уже идёт";
+    if (pid === s.host) return "Хозяин стола не может встать";
+    s.players = s.players.filter(p => p.id !== pid);
+  },
+  start(s, pid) {
+    if (s.status !== "lobby") return "Партия уже началась";
+    if (pid !== s.host) return "Начать может только хозяин стола";
+    if (s.players.length < 2) return "Нужно хотя бы два игрока";
+    dealStart(s);
+  },
+  again(s, pid) {
+    if (s.status !== "over") return "Партия ещё идёт";
+    if (pid !== s.host && !s.local) return "Новую партию начинает хозяин стола";
+    dealStart(s);
+  },
+  move(s, pid, a) {
+    const pi = idxOf(s, pid);
+    if (s.status !== "play") return "Партия не идёт";
+    if (s.turn !== pi) return "Сейчас не ваш ход";
+    const placed = (a.placed || []).map(p => ({i: +p.i, ch: String(p.ch), t: String(p.t)}));
+    const r2 = s.players[pi].rack.slice();
+    for (const p of placed) {
+      const k = r2.indexOf(p.t); if (k < 0) return "Фишки изменились, выложите заново"; r2.splice(k, 1);
+      if (p.t === "*" ? !ALPHA.includes(p.ch.toUpperCase()) || p.ch !== p.ch.toLowerCase() : p.ch !== p.t) return "Неверная фишка";
+    }
+    const ev = evaluate(bArr(s.board), placed);
+    if (ev.err != null) return ev.err || "Выложите фишки";
+    const drawn = s.bag.splice(0, Math.min(placed.length, s.bag.length));
+    r2.push(...drawn);
+    s.players[pi].rack = r2; s.players[pi].score += ev.score; s.board = bStr(ev.board);
+    s.last = {p: pi, cells: placed.map(x => x.i), used: placed.map(x => x.t), drawn, score: ev.score, words: ev.words.map(w => w.word)};
+    s.log.push({t: "move", p: pi, words: ev.words, score: ev.score, bingo: ev.bingo});
+    s.passes = 0; s.turn = (pi + 1) % s.players.length;
+    if (!r2.length && !s.bag.length) s.last.endAdj = endGame(s, pi);
+    trimLog(s);
+  },
+  pass(s, pid) {
+    const pi = idxOf(s, pid);
+    if (s.status !== "play" || s.turn !== pi) return "Сейчас не ваш ход";
+    s.passes++; s.last = null; s.log.push({t: "pass", p: pi}); s.turn = (pi + 1) % s.players.length;
+    if (s.passes >= 2 * s.players.length) endGame(s, null);
+    trimLog(s);
+  },
+  swap(s, pid, a) {
+    const pi = idxOf(s, pid);
+    if (s.status !== "play" || s.turn !== pi) return "Сейчас не ваш ход";
+    if (s.bag.length < RACK) return "В мешке меньше 7 фишек, обмен невозможен";
+    const letters = (a.letters || []).map(String);
+    if (!letters.length) return "Выберите фишки для обмена";
+    const r2 = s.players[pi].rack.slice();
+    for (const l of letters) { const k = r2.indexOf(l); if (k < 0) return "Фишки изменились"; r2.splice(k, 1); }
+    const drawn = s.bag.splice(0, letters.length);
+    s.bag.push(...letters); shuffle(s.bag);
+    s.players[pi].rack = r2.concat(drawn);
+    s.passes++; s.last = null; s.log.push({t: "swap", p: pi, n: letters.length}); s.turn = (pi + 1) % s.players.length;
+    if (s.passes >= 2 * s.players.length) endGame(s, null);
+    trimLog(s);
+  },
+  challenge(s, pid) {
+    const L = s.last; if (!L) return "Оспаривать нечего";
+    const pi = idxOf(s, pid);
+    if (pi < 0) return "Оспаривать могут только игроки этой партии";
+    if (!s.local && pi === L.p) return "Свой ход оспорить нельзя";
+    if (L.endAdj) { L.endAdj.forEach((d, j) => s.players[j].score -= d); s.status = "play"; s.log = s.log.filter(e => e.t !== "end"); }
+    const b = bArr(s.board); L.cells.forEach(i => b[i] = ""); s.board = bStr(b);
+    const P = s.players[L.p]; const r2 = P.rack.slice();
+    for (const d of L.drawn) { const k = r2.indexOf(d); if (k >= 0) r2.splice(k, 1); }
+    r2.push(...L.used); P.rack = r2;
+    s.bag.push(...L.drawn); shuffle(s.bag); P.score -= L.score;
+    s.log.push({t: "undo", p: pi, target: L.p, words: L.words, score: L.score});
+    s.last = null; trimLog(s);
+  },
+};
+
+// what one client may see: only their own rack
+function sanitize(s, pid) {
+  const c = clone(s);
+  c.players.forEach(p => { if (p.id !== pid) p.rack = p.rack.map(() => "?"); });
+  c.bag = c.bag.map(() => "?");
+  if (c.last) { c.last.used = []; c.last.drawn = []; }
+  return c;
+}
+
+// ---------- app state ----------
+const PID = load("bukvoed-pid") || (() => { const v = "p" + rand(12); store("bukvoed-pid", v); return v; })();
+let myName = load("bukvoed-name") || "";
+let mode = null;              // host | client | local
+let room = null, peer = null, hostConn = null, conns = new Map(), online = [];
+let net = "idle", netSince = 0, rcTimer = null;
+let G = null;
+let pending = [], sel = null, swapMode = false, swapSel = new Set(), order = [], rackKey = "";
+let revealed = false, revealTurn = -1, view = "play";
+const reqs = new Map();
+
+let toastTimer;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3200); }
+function meIdx() { if (!G) return -1; if (mode === "local") return G.status === "play" ? G.turn : -1; return idxOf(G, PID); }
+const playerName = (s, j) => (s.players[j] && s.players[j].name) || ("Игрок " + (j + 1));
+const roomUrl = code => location.origin + location.pathname + "?room=" + code;
+const peerOk = () => typeof window.Peer === "function";
+function setNet(v) { if (net !== v) { net = v; netSince = Date.now(); } render(); }
+
+// ---------- dispatch ----------
+function act(name, args) {
+  args = args || {};
+  if (mode === "client") {
+    if (!hostConn || !hostConn.open) { toast("Нет связи с хозяином стола"); return Promise.resolve(false); }
+    const id = rand(8);
+    hostConn.send({type: "act", name, args, id});
+    return new Promise(res => {
+      reqs.set(id, res);
+      setTimeout(() => { if (reqs.has(id)) { reqs.delete(id); toast("Хозяин стола не ответил, попробуйте ещё раз"); res(false); } }, 8000);
+    });
+  }
+  const pid = mode === "local" ? (G.players[G.turn] || {}).id : PID;
+  const err = applyAction(name, pid, args);
+  if (err) toast(err);
+  return Promise.resolve(!err);
+}
+function applyAction(name, pid, args) {
+  if (!ACTIONS[name]) return "Неизвестное действие";
+  const s = clone(G);
+  const r = ACTIONS[name](s, pid, args || {});
+  if (typeof r === "string") return r;
+  s.seq = (s.seq || 0) + 1; G = s;
+  persist(); broadcast(); render();
+  return null;
+}
+function persist() {
+  if (mode === "local") store("bukvoed-local", JSON.stringify(G));
+  if (mode === "host") store("bukvoed-host-" + room, JSON.stringify(G));
+}
+
+// ---------- host ----------
+function hostState(code) { try { return JSON.parse(load("bukvoed-host-" + code) || "null"); } catch (e) { return null; } }
+function createRoom() {
+  const name = cleanName($("#name-input") && $("#name-input").value);
+  if (!name) { toast("Введите имя"); return; }
+  myName = name; store("bukvoed-name", name);
+  const code = rand(5, "ABCDEFGHJKLMNPQRSTUVWXYZ23456789");
+  const s = newGameState(false); s.host = PID; s.players.push({id: PID, name, score: 0, rack: []});
+  store("bukvoed-host-" + code, JSON.stringify(s));
+  try { history.replaceState(null, "", "?room=" + code + location.hash); } catch (e) {}
+  startHost(code);
+}
+function startHost(code) {
+  teardown();
+  mode = "host"; room = code; G = hostState(code); resetLocalUI();
+  if (!peerOk()) { setNet("nolib"); return; }
+  setNet("starting");
+  peer = new Peer(PEER_PREFIX + code, PEER_OPTS);
+  peer.on("open", () => setNet("open"));
+  peer.on("connection", conn => {
+    conn.on("data", d => onHostData(conn, d));
+    conn.on("close", () => { if (conn.pid && conns.get(conn.pid) === conn) { conns.delete(conn.pid); broadcast(); render(); } });
+    conn.on("error", () => {});
+  });
+  peer.on("disconnected", () => { setNet("reconnecting"); setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 2000); });
+  peer.on("error", e => {
+    if (e.type === "unavailable-id") { setNet("taken"); retry(() => startHost(code), 6000); }
+    else if (["network", "server-error", "socket-error", "socket-closed"].includes(e.type)) { setNet("error"); retry(() => startHost(code), 6000); }
+  });
+}
+function onHostData(conn, d) {
+  if (!d || typeof d !== "object") return;
+  if (d.type === "hello") {
+    const pid = String(d.pid || "").slice(0, 40); if (!pid || pid === PID) return;
+    const old = conns.get(pid); if (old && old !== conn) { try { old.close(); } catch (e) {} }
+    conn.pid = pid; conns.set(pid, conn);
+    const j = idxOf(G, pid), nm = cleanName(d.name);
+    if (j >= 0 && nm && G.players[j].name !== nm) { const s = clone(G); s.players[j].name = nm; G = s; persist(); }
+    broadcast(); render();
+  } else if (d.type === "act" && conn.pid) {
+    const err = applyAction(String(d.name), conn.pid, d.args);
+    if (conn.open) conn.send({type: "res", id: d.id, err});
+  }
+}
+function broadcast() {
+  if (mode !== "host") return;
+  online = [PID, ...[...conns.values()].filter(c => c.open).map(c => c.pid)];
+  for (const c of conns.values()) if (c.open) { try { c.send({type: "state", state: sanitize(G, c.pid), online}); } catch (e) {} }
+}
+
+// ---------- client ----------
+function joinRoom(code) {
+  teardown();
+  mode = "client"; room = code; G = null; resetLocalUI();
+  if (!peerOk()) { setNet("nolib"); return; }
+  setNet("connecting");
+  peer = new Peer(undefined, PEER_OPTS);
+  peer.on("open", () => connectHost());
+  peer.on("disconnected", () => setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 2000));
+  peer.on("error", e => {
+    if (e.type === "peer-unavailable") { setNet("nohost"); retry(connectHost, 5000); }
+    else if (["network", "server-error", "socket-error", "socket-closed"].includes(e.type)) { setNet("error"); retry(() => joinRoom(code), 6000); }
+  });
+}
+function connectHost() {
+  if (mode !== "client" || !peer || peer.destroyed) return;
+  if (peer.disconnected) { peer.reconnect(); return; }
+  if (hostConn) { try { hostConn.close(); } catch (e) {} }
+  const c = peer.connect(PEER_PREFIX + room, {reliable: true});
+  hostConn = c;
+  if (net !== "open") setNet(net === "nohost" ? "nohost" : "connecting");
+  c.on("open", () => { c.send({type: "hello", pid: PID, name: myName}); setNet("open"); });
+  c.on("data", d => {
+    if (!d || typeof d !== "object") return;
+    if (d.type === "state") { G = d.state; online = d.online || []; render(); }
+    else if (d.type === "res") { const r = reqs.get(d.id); if (r) { reqs.delete(d.id); if (d.err) toast(d.err); r(!d.err); } }
+  });
+  c.on("close", () => { if (hostConn === c) { setNet("lost"); retry(connectHost, 3000); } });
+  c.on("error", () => {});
+}
+function retry(fn, ms) { if (rcTimer) return; rcTimer = setTimeout(() => { rcTimer = null; fn(); }, ms); }
+setInterval(() => {
+  if (mode !== "client") return;
+  const stuck = net === "connecting" && Date.now() - netSince > 15000;
+  if (stuck) setNet("slow");
+  if (net !== "open" && (!hostConn || !hostConn.open)) retry(connectHost, 4000);
+}, 5000);
+
+function teardown() {
+  if (rcTimer) { clearTimeout(rcTimer); rcTimer = null; }
+  if (peer) { try { peer.destroy(); } catch (e) {} }
+  peer = null; hostConn = null; conns = new Map(); online = []; net = "idle";
+}
+
+// ---------- local ----------
+function startLocal(fresh) {
+  teardown(); mode = "local"; room = null; resetLocalUI();
+  let s = null;
+  if (!fresh) { try { s = JSON.parse(load("bukvoed-local") || "null"); } catch (e) {} }
+  if (!s || s.status === "lobby" || s.v !== 2) {
+    s = newGameState(true);
+    for (let j = 1; j <= 3; j++) s.players.push({id: "local" + j, name: "Игрок " + j, score: 0, rack: []});
+    s.host = "local1"; dealStart(s);
+  }
+  G = s; persist(); render();
+}
+function toHome() {
+  teardown(); mode = null; G = null; room = null; resetLocalUI();
+  try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
+  render();
+}
+function closeTable() {
+  store("bukvoed-host-" + room, null);
+  toHome();
+}
+function resetLocalUI() { pending = []; sel = null; swapMode = false; swapSel.clear(); order = []; rackKey = ""; revealed = false; revealTurn = -1; }
+
+// ---------- player actions from the UI ----------
+function doMove() {
+  const rack = myRack();
+  const placed = pending.map(p => ({i: p.i, ch: p.ch, t: rack[p.r]}));
+  act("move", {placed}).then(ok => { if (ok) { pending = []; render(); } });
+}
+function doSwap() {
+  const rack = myRack(); const letters = [...swapSel].map(r => rack[r]);
+  act("swap", {letters}).then(ok => { if (ok) { swapMode = false; swapSel.clear(); pending = []; render(); } });
+}
+function doJoin() {
+  const inp = $("#seat-name");
+  const name = cleanName(inp ? inp.value : myName);
+  if (!name) { toast("Введите имя"); return; }
+  myName = name; store("bukvoed-name", name);
+  act("join", {name});
+}
+
+// ---------- rendering ----------
+function render() {
+  const root = $("#view-play");
+  const focusId = document.activeElement && document.activeElement.id;
+  const keep = focusId && document.activeElement.tagName === "INPUT" ? {id: focusId, v: document.activeElement.value} : null;
+  root.replaceChildren(mode === "local" && G ? tableView() : mode ? roomView() : homeView());
+  if (keep) { const el = document.getElementById(keep.id); if (el) { el.value = keep.v; el.focus(); } }
+}
+
+function demoBoard() {
+  const b = bArr(EMPTY);
+  "БУКВОЕД".split("").forEach((ch, k) => b[7 * N + 4 + k] = ch);
+  "СЛОВО".split("").forEach((ch, k) => b[(5 + k) * N + 8] = ch);
+  "КОТ".split("").forEach((ch, k) => b[9 * N + 7 + k] = ch);
+  return boardEl(bStr(b), false);
+}
+
+function homeView() {
+  const left = h("div", {class: "stack"},
+    h("div", {}, h("h2", {}, "Собирайте слова из фишек и обгоняйте друзей по очкам"),
+      h("p", {class: "lede"}, "Поле 15 на 15, семь фишек на руках, бонусные клетки и три места за столом. Создайте стол и отправьте ссылку друзьям, регистрация не нужна.")),
+    h("div", {class: "demo"}, demoBoard()));
+  const create = h("form", {class: "panel stack", onsubmit: e => { e.preventDefault(); createRoom(); }},
+    h("h3", {}, "Новый стол"),
+    h("label", {}, "Ваше имя", h("input", {class: "field", id: "name-input", maxlength: "20", autocomplete: "nickname", value: myName, placeholder: "Например, Маша"})),
+    h("div", {class: "row"}, h("button", {class: "btn primary", type: "submit", disabled: !peerOk()}, "Создать стол")),
+    h("p", {class: "note"}, peerOk() ? "Вы станете хозяином стола. Пока идёт партия, держите эту вкладку открытой." : "Не загрузилась библиотека для игры по сети. Проверьте интернет и обновите страницу."));
+  const join = h("form", {class: "panel stack", onsubmit: e => { e.preventDefault(); const c = ($("#code-input").value || "").trim().toUpperCase(); if (c) location.search = "?room=" + encodeURIComponent(c); }},
+    h("h3", {}, "Есть код стола?"),
+    h("div", {class: "row"}, h("input", {class: "field code", id: "code-input", maxlength: "8", placeholder: "ABCDE", "aria-label": "Код стола"}),
+      h("button", {class: "btn", type: "submit"}, "Войти")));
+  const hasLocal = !!load("bukvoed-local");
+  const local = h("div", {class: "panel stack"}, h("h3", {}, "На одном экране"),
+    h("p", {class: "note"}, "Трое игроков по очереди ходят с одного устройства. Фишки игрока прячутся, пока он не нажмёт «Показать»."),
+    h("div", {class: "row"},
+      h("button", {class: "btn", type: "button", onclick: () => startLocal(false)}, hasLocal ? "Продолжить партию" : "Играть на одном экране"),
+      hasLocal ? h("button", {class: "btn small", type: "button", onclick: () => startLocal(true)}, "Новая") : null));
+  return h("div", {class: "lobby"}, left, h("div", {class: "stack"}, create, join, local));
+}
+
+function netChip() {
+  const m = {
+    starting: ["wait", "Открываем стол…"], open: ["play", mode === "host" ? "Стол открыт" : "На связи"],
+    connecting: ["wait", "Подключаемся…"], reconnecting: ["wait", "Переподключаемся…"],
+    lost: ["bad", "Связь потеряна, переподключаемся"], nohost: ["bad", "Хозяин стола не в сети"],
+    taken: ["wait", "Стол открыт в другой вкладке, ждём…"], error: ["bad", "Нет связи с сервером"],
+    slow: ["bad", "Не удаётся соединиться"], nolib: ["bad", "Библиотека не загрузилась"],
+  }[net] || ["wait", "…"];
+  return h("span", {class: "chip " + m[0]}, m[1]);
+}
+function shareBox() {
+  const url = roomUrl(room);
+  const inp = h("input", {class: "field", id: "share-url", readonly: true, value: url, "aria-label": "Ссылка на стол", onfocus: e => e.target.select()});
+  return h("div", {class: "stack"},
+    h("div", {class: "share"}, inp, h("button", {class: "btn small", type: "button", onclick: () => {
+      const done = () => toast("Ссылка скопирована");
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, () => { inp.focus(); inp.select(); });
+      else { inp.focus(); inp.select(); }
+    }}, "Копировать")),
+    h("p", {class: "note"}, "Код стола: ", h("b", {}, room)));
+}
+
+function roomView() {
+  if (!G) {
+    const hint = {
+      nohost: "Хозяин стола сейчас не в сети или закрыл вкладку. Как только он вернётся, вы подключитесь сами.",
+      slow: "Соединение не устанавливается. Возможно, ваша сеть блокирует прямые соединения: попробуйте другую сеть Wi-Fi или мобильный интернет.",
+      error: "Не удаётся связаться с сервером соединений. Проверьте интернет.",
+      nolib: "Не загрузилась библиотека для игры по сети. Обновите страницу.",
+    }[net] || "Ищем стол " + room + "…";
+    return h("div", {class: "stack"},
+      h("div", {class: "tbar"}, h("button", {class: "btn small", type: "button", onclick: toHome}, "← На главную"), netChip()),
+      h("div", {class: "panel stack", style: "max-width:520px"}, h("h3", {}, "Стол " + room), h("p", {class: "note"}, hint)));
+  }
+  if (mode === "host" && net === "taken") {
+    // fall through to the table, the chip explains the wait
+  }
+  return tableView();
+}
+
+function boardEl(boardS, interactive) {
+  const b = bArr(boardS);
+  const pend = new Map(interactive ? pending.map(p => [p.i, p]) : []);
+  const lastSet = new Set(interactive && G && G.last ? G.last.cells : []);
+  const grid = h("div", {class: "board" + (interactive ? "" : " static"), "aria-label": "Игровое поле"});
+  for (let i = 0; i < 225; i++) {
+    const pr = prem(i), ch = b[i], p = pend.get(i);
+    const label = (ch ? ch.toUpperCase() : p ? p.ch.toUpperCase() : "пусто") + ", ряд " + (Math.floor(i / N) + 1) + ", столбец " + (i % N + 1);
+    const cell = h(interactive ? "button" : "div", {class: "cell" + (pr ? " p-" + pr : ""), "data-i": i, type: interactive ? "button" : null, "aria-label": interactive ? label : null, tabindex: interactive && ch ? "-1" : null});
+    if (ch) cell.append(tileEl(ch, lastSet.has(i) ? "last" : ""));
+    else if (p) { const t = tileEl(p.ch, "pending"); t.draggable = true; t.dataset.drag = "p:" + i; cell.append(t); }
+    else if (pr) cell.append(h("span", {class: "plabel"}, PLBL[pr]));
+    grid.append(cell);
+  }
+  if (!interactive) return h("div", {class: "board-frame"}, grid);
+  grid.addEventListener("click", e => { const c = e.target.closest(".cell"); if (c) onCell(+c.dataset.i); });
+  grid.addEventListener("dragstart", e => { const t = e.target.closest("[data-drag]"); if (t) e.dataTransfer.setData("text/plain", t.dataset.drag); });
+  grid.addEventListener("dragover", e => { const c = e.target.closest(".cell"); if (c && !bArr(G.board)[+c.dataset.i]) { e.preventDefault(); c.classList.add("drop"); } });
+  grid.addEventListener("dragleave", e => { const c = e.target.closest(".cell"); if (c) c.classList.remove("drop"); });
+  grid.addEventListener("drop", e => {
+    const c = e.target.closest(".cell"); if (!c) return; e.preventDefault();
+    const i = +c.dataset.i, d = e.dataTransfer.getData("text/plain");
+    if (d.startsWith("r:")) { sel = +d.slice(2); placeAt(i); }
+    else if (d.startsWith("p:")) { const from = +d.slice(2); const p = pending.find(x => x.i === from); if (p && !pending.some(x => x.i === i) && !bArr(G.board)[i]) { p.i = i; render(); } }
+  });
+  return h("div", {class: "board-frame"}, grid);
+}
+
+function onCell(i) {
+  if (!G || G.status !== "play" || meIdx() < 0) return;
+  if (bArr(G.board)[i]) return;
+  const k = pending.findIndex(p => p.i === i);
+  if (k >= 0) { pending.splice(k, 1); render(); return; }
+  if (sel == null) { toast("Сначала выберите фишку внизу"); return; }
+  placeAt(i);
+}
+function placeAt(i) {
+  if (sel == null || pending.some(p => p.i === i) || bArr(G.board)[i]) return;
+  const r = sel, ch = myRack()[r]; sel = null;
+  if (ch == null || ch === "?" || pending.some(p => p.r === r)) return;
+  if (ch === "*") { openBlankPicker(i, r); return; }
+  pending.push({i, r, ch}); render();
+}
+function openBlankPicker(i, r) {
+  const root = $("#overlay-root");
+  const close = () => { root.replaceChildren(); document.removeEventListener("keydown", esc); };
+  const esc = e => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", esc);
+  const grid = h("div", {class: "grid"});
+  for (const L of ALPHA) {
+    const b = tileEl(L.toLowerCase(), "", "button"); b.type = "button"; b.setAttribute("aria-label", L);
+    b.addEventListener("click", () => { pending.push({i, r, ch: L.toLowerCase()}); close(); render(); });
+    grid.append(b);
+  }
+  root.replaceChildren(h("div", {class: "overlay", onclick: e => { if (e.target.classList.contains("overlay")) close(); }},
+    h("div", {class: "picker", role: "dialog", "aria-label": "Буква для пустышки"},
+      h("h3", {}, "Какую букву обозначит пустышка?"), grid,
+      h("button", {class: "btn", type: "button", onclick: close}, "Отмена"))));
+  grid.querySelector("button").focus();
+}
+function myRack() { const mi = meIdx(); return mi >= 0 && G.players[mi] ? G.players[mi].rack : []; }
+
+function syncRack() {
+  const rack = myRack(), key = meIdx() + "|" + rack.join("");
+  if (key !== rackKey) { pending = []; sel = null; swapSel.clear(); swapMode = false; order = rack.map((_, k) => k); }
+  rackKey = key;
+  const b = bArr(G.board);
+  pending = pending.filter(p => !b[p.i] && p.r < rack.length);
+  if (order.length !== rack.length) order = rack.map((_, k) => k);
+}
+
+function tableView() {
+  syncRack();
+  const s = G, mi = meIdx(), myTurn = s.status === "play" && s.turn === mi;
+  if (mode === "local" && revealTurn !== s.turn) { revealed = false; revealTurn = s.turn; }
+
+  const status = s.status === "lobby" ? "Сбор игроков" : s.status === "over" ? "Партия окончена" :
+    (myTurn && mode !== "local" ? "Ваш ход" : "Ходит " + playerName(s, s.turn));
+  const bar = h("div", {class: "tbar"},
+    h("button", {class: "btn small", type: "button", onclick: toHome}, "← На главную"),
+    h("div", {class: "row"}, mode !== "local" ? netChip() : null,
+      h("span", {class: "chip " + (s.status === "lobby" ? "wait" : s.status === "play" ? "play" : "over")}, status)));
+
+  const side = h("div", {class: "side"});
+  if (s.status === "lobby") side.append(seatsPanel(s));
+  else {
+    if (s.status === "over") side.append(finalPanel(s));
+    side.append(playersPanel(s, mi));
+    if (s.status === "play" && mi >= 0) side.append(rackPanel(s, mi, myTurn));
+    else if (s.status === "play") side.append(h("div", {class: "panel note"}, "Вы наблюдаете за партией: все места заняты."));
+    side.append(logPanel(s, mi));
+    if (mode !== "local") side.append(h("div", {class: "panel stack"}, h("h3", {}, "Ссылка на стол"), shareBox(), hostNote()));
+  }
+  return h("div", {}, bar, h("div", {class: "table"}, h("div", {}, boardEl(s.board, s.status === "play")), side));
+}
+function hostNote() {
+  if (mode !== "host") return null;
+  return h("div", {class: "stack"},
+    h("p", {class: "note"}, "Вы хозяин стола: партия живёт в этой вкладке. Не закрывайте её, пока играете."),
+    h("div", {class: "row"}, h("button", {class: "btn small danger", type: "button", onclick: e => {
+      const b = e.currentTarget;
+      if (b.dataset.armed) closeTable(); else { b.dataset.armed = "1"; b.textContent = "Точно закрыть? Нажмите ещё раз"; }
+    }}, "Закрыть стол")));
+}
+
+function avatar(s, j) {
+  const p = s.players[j];
+  const on = mode === "local" || online.includes(p.id);
+  return h("span", {class: "av tile"}, h("span", {class: "tl"}, (p.name || "?").slice(0, 1).toUpperCase()), mode !== "local" ? h("i", {class: on ? "on" : "", title: on ? "в сети" : "не в сети"}) : null);
+}
+function seatsPanel(s) {
+  const mine = idxOf(s, PID) >= 0, host = s.host === PID;
+  const seats = h("div", {class: "seats"});
+  for (let j = 0; j < MAXP; j++) {
+    const p = s.players[j];
+    seats.append(h("div", {class: "pl"}, p ? avatar(s, j) : h("span", {}),
+      h("span", {class: "nm"}, p ? playerName(s, j) : h("small", {}, "свободное место"), p && p.id === s.host ? h("small", {}, " · хозяин") : null, p && p.id === PID ? h("small", {}, " · вы") : null), h("span", {})));
+  }
+  const box = h("div", {class: "panel stack"}, h("h3", {}, "За столом " + s.players.length + " из 3"), seats);
+  if (!mine && s.players.length < MAXP) {
+    box.append(h("form", {class: "row", onsubmit: e => { e.preventDefault(); doJoin(); }},
+      h("input", {class: "field", id: "seat-name", maxlength: "20", autocomplete: "nickname", value: myName, placeholder: "Ваше имя", "aria-label": "Ваше имя"}),
+      h("button", {class: "btn primary", type: "submit", disabled: net !== "open"}, "Сесть за стол")));
+  } else if (!mine) box.append(h("p", {class: "note"}, "Все места заняты, вы будете зрителем."));
+  const row = h("div", {class: "row"});
+  if (host) row.append(h("button", {class: "btn primary", type: "button", onclick: () => act("start"), disabled: s.players.length < 2}, "Начать партию"));
+  if (mine && !host) row.append(h("button", {class: "btn", type: "button", onclick: () => act("leave")}, "Встать из-за стола"));
+  if (row.childNodes.length) box.append(row);
+  box.append(h("p", {class: "note"}, host ? "Отправьте друзьям ссылку ниже. Когда они сядут, нажмите «Начать партию». Играть можно и вдвоём." : "Ждём, пока хозяин стола начнёт игру."));
+  return h("div", {class: "stack"}, box, h("div", {class: "panel stack"}, h("h3", {}, "Ссылка на стол"), shareBox(), hostNote()));
+}
+function playersPanel(s, mi) {
+  const list = h("div", {class: "players"});
+  s.players.forEach((p, j) => list.append(h("div", {class: "pl" + (s.status === "play" && s.turn === j ? " turn" : "")},
+    avatar(s, j),
+    h("span", {class: "nm"}, playerName(s, j), mode !== "local" && j === mi ? h("small", {}, " · вы") : null, h("small", {}, " · фишек: " + p.rack.length)),
+    h("span", {class: "sc"}, p.score))));
+  return h("div", {class: "panel stack"}, list, h("div", {class: "bagline"}, h("span", {}, "В мешке"), h("b", {}, s.bag.length + " фиш.")));
+}
+function finalPanel(s) {
+  const best = Math.max(...s.players.map(p => p.score));
+  const win = s.players.map((p, j) => p.score === best ? playerName(s, j) : null).filter(Boolean);
+  const canAgain = mode === "local" || s.host === PID;
+  return h("div", {class: "panel stack final"}, h("h3", {}, win.length > 1 ? "Ничья: " + win.join(" и ") : "Победа: " + win[0]),
+    h("p", {class: "note"}, "Счёт уже учитывает оставшиеся на руках фишки."),
+    canAgain ? h("div", {class: "row"}, h("button", {class: "btn primary", type: "button", onclick: () => act("again")}, "Сыграть ещё тем же составом")) :
+      h("p", {class: "note"}, "Новую партию может начать хозяин стола."));
+}
+
+function rackPanel(s, mi, myTurn) {
+  const rack = s.players[mi].rack;
+  const wrap = h("div", {class: "panel stack"});
+  if (mode === "local" && !revealed) {
+    wrap.append(h("div", {class: "cover"}, h("b", {}, "Ход: " + playerName(s, mi)), h("span", {}, "Остальные, отвернитесь."),
+      h("button", {class: "btn primary", type: "button", onclick: () => { revealed = true; render(); }}, "Показать мои фишки")));
+    return wrap;
+  }
+  const used = new Set(pending.map(p => p.r));
+  const rk = h("div", {class: "rack", "aria-label": "Ваши фишки"});
+  for (const r of order) {
+    if (r >= rack.length) continue;
+    if (used.has(r)) { rk.append(h("span", {class: "slot"})); continue; }
+    const t = tileEl(rack[r], (sel === r ? "sel" : "") + (swapSel.has(r) ? " swap" : ""), "button");
+    t.type = "button"; t.draggable = !swapMode;
+    t.setAttribute("aria-label", rack[r] === "*" ? "пустышка" : rack[r]);
+    t.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", "r:" + r));
+    t.addEventListener("click", () => {
+      if (swapMode) { swapSel.has(r) ? swapSel.delete(r) : swapSel.add(r); }
+      else sel = sel === r ? null : r;
+      render();
+    });
+    rk.append(t);
+  }
+  for (let k = rack.length; k < RACK; k++) rk.append(h("span", {class: "slot"}));
+  wrap.append(rk);
+
+  if (swapMode) {
+    wrap.append(h("p", {class: "note"}, "Отметьте фишки, которые хотите сбросить в мешок."),
+      h("div", {class: "row"},
+        h("button", {class: "btn primary", type: "button", onclick: doSwap, disabled: !swapSel.size}, "Обменять " + (swapSel.size || "")),
+        h("button", {class: "btn", type: "button", onclick: () => { swapMode = false; swapSel.clear(); render(); }}, "Отмена")));
+    return wrap;
+  }
+
+  const ev = pending.length ? evaluate(bArr(s.board), pending.map(p => ({i: p.i, ch: p.ch}))) : null;
+  const pv = h("div", {class: "preview"});
+  if (!ev) pv.append(h("span", {class: "note"}, myTurn ? "Выберите фишку и нажмите клетку на поле." : "Сейчас не ваш ход, но фишки можно раскладывать заранее."));
+  else if (ev.err) pv.append(h("span", {class: "err"}, ev.err));
+  else pv.append(h("span", {}, ev.words.map(w => w.word + " " + w.score).join(" + ") + (ev.bingo ? " + 50 за все фишки" : "") + " = "), h("span", {class: "pts"}, ev.score + " очк."));
+  wrap.append(pv);
+  if (ev && !ev.err) wrap.append(dictLinks(ev.words.map(w => w.word)));
+
+  wrap.append(h("div", {class: "row"},
+    h("button", {class: "btn primary", type: "button", onclick: doMove, disabled: !myTurn || !ev || !!ev.err}, "Сходить"),
+    h("button", {class: "btn", type: "button", onclick: () => { pending = []; sel = null; render(); }, disabled: !pending.length}, "Вернуть фишки"),
+    h("button", {class: "btn", type: "button", onclick: () => { pending = []; sel = null; shuffle(order); render(); }}, "Перемешать")));
+  wrap.append(h("div", {class: "row"},
+    h("button", {class: "btn small", type: "button", disabled: !myTurn || s.bag.length < RACK, onclick: () => { pending = []; sel = null; swapMode = true; render(); }}, "Обменять фишки"),
+    h("button", {class: "btn small", type: "button", disabled: !myTurn, onclick: () => act("pass")}, "Пропустить ход")));
+  return wrap;
+}
+
+function logPanel(s, mi) {
+  const wrap = h("div", {class: "panel stack"}, h("h3", {}, "Ходы"));
+  const L = s.last;
+  if (L && (mode === "local" || (mi >= 0 && mi !== L.p))) {
+    wrap.append(h("div", {class: "stack"},
+      h("span", {class: "note"}, "Последний ход " + playerName(s, L.p) + ": " + L.words.join(", ") + ". Не согласны со словом?"),
+      dictLinks(L.words),
+      h("div", {class: "row"}, h("button", {class: "btn small danger", type: "button", onclick: () => act("challenge")}, "Оспорить ход"))));
+  }
+  const list = h("div", {class: "log"});
+  for (const e of s.log.slice().reverse()) {
+    const who = e.p != null ? playerName(s, e.p) : "";
+    if (e.t === "move") list.append(h("div", {class: "e"}, h("span", {}, who + ": ", h("span", {class: "w"}, e.words.map(w => w.word).join(", ")), e.bingo ? " (все 7!)" : ""), h("span", {class: "p"}, "+" + e.score)));
+    else if (e.t === "pass") list.append(h("div", {class: "e"}, h("span", {}, who + " пропускает ход"), h("span", {class: "p"}, "0")));
+    else if (e.t === "swap") list.append(h("div", {class: "e"}, h("span", {}, who + " меняет фишки: " + e.n), h("span", {class: "p"}, "0")));
+    else if (e.t === "undo") list.append(h("div", {class: "e undo"}, h("span", {}, who + ": оспорен ход игрока " + playerName(s, e.target) + " — " + e.words.join(", ")), h("span", {class: "p"}, "−" + e.score)));
+    else if (e.t === "end") list.append(h("div", {class: "e"}, h("span", {}, "Конец партии, расчёт за оставшиеся фишки"), h("span", {class: "p"}, e.adj.map(d => (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d)).join(" / "))));
+    else if (e.t === "start") list.append(h("div", {class: "e"}, h("span", {}, "Партия началась, первым ходит " + who), h("span", {})));
+  }
+  wrap.append(list);
+  return wrap;
+}
+
+// ---------- tabs & rules ----------
+function setView(v) {
+  view = v === "rules" ? "rules" : "play";
+  $("#view-play").hidden = view !== "play"; $("#view-rules").hidden = view !== "rules";
+  document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.view === view)));
+  try { history.replaceState(null, "", location.search + "#" + view); } catch (e) {}
+}
+document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+const lg = $("#lettergrid");
+for (const [k, [n, v]] of Object.entries(SET)) lg.append(h("div", {class: "lg"}, tileEl(k), h("span", {}, (k === "*" ? "0 очк." : v + " очк.") + " · ×" + n)));
+
+// ---------- boot ----------
+setView(location.hash === "#rules" ? "rules" : "play");
+const qRoom = (new URLSearchParams(location.search).get("room") || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+if (qRoom) { if (hostState(qRoom)) startHost(qRoom); else joinRoom(qRoom); }
+else render();
+window.addEventListener("beforeunload", e => { if (mode === "host" && G && G.status === "play") { e.preventDefault(); e.returnValue = ""; } });
+})();
+</script>
+</body>
+</html>
