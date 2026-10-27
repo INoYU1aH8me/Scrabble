@@ -47,6 +47,13 @@ a { color: inherit; }
 .brand h1 { font-family: var(--f-display); font-weight: 700; font-size: 22px; letter-spacing: .01em; margin: 0; }
 .brand p { margin: 0; color: var(--muted); font-size: 13px; }
 .tabs { display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+.topr { display: flex; align-items: center; gap: 8px; }
+.sound { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 12px 0 0; }
+.sound .sound-btn { border: 0; background: transparent; }
+.sound input { width: 84px; accent-color: var(--accent); cursor: pointer; }
+.sound-btn { width: 40px; height: 40px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: 17px; line-height: 1; }
+.sound-btn[aria-pressed="false"] { opacity: .55; }
+.sound-btn:focus-visible { outline: 3px solid var(--brass); outline-offset: 2px; }
 .tabs button { border: 0; background: transparent; padding: 7px 16px; border-radius: 999px; cursor: pointer; font-weight: 600; color: var(--muted); }
 .tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
 .tabs button:focus-visible, .btn:focus-visible, .cell:focus-visible, .rack .tile:focus-visible, .field:focus-visible { outline: 3px solid var(--brass); outline-offset: 2px; }
@@ -181,10 +188,16 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
         <p>Слова из фишек на троих, по общей ссылке</p>
       </div>
     </div>
-    <nav class="tabs" role="tablist">
-      <button type="button" role="tab" id="tab-play" aria-selected="true" data-view="play">Игра</button>
-      <button type="button" role="tab" id="tab-rules" aria-selected="false" data-view="rules">Правила</button>
-    </nav>
+    <div class="topr">
+      <div class="sound">
+        <button type="button" class="sound-btn" id="sound-btn" aria-pressed="true" title="Звук">🔊</button>
+        <input type="range" id="sound-vol" min="0" max="100" step="5" value="70" aria-label="Громкость звуков">
+      </div>
+      <nav class="tabs" role="tablist">
+        <button type="button" role="tab" id="tab-play" aria-selected="true" data-view="play">Игра</button>
+        <button type="button" role="tab" id="tab-rules" aria-selected="false" data-view="rules">Правила</button>
+      </nav>
+    </div>
   </header>
 
   <main>
@@ -252,6 +265,7 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
 
       <h3>Время</h3>
       <p>Рядом с каждым игроком видно, сколько всего времени он думал над ходами, а у того, кто ходит сейчас, ещё и время текущего хода. Пока ход на голосовании, часы стоят. Если игрок думает над ходом дольше 5 минут, его имя зачёркивается и рядом появляется красная надпись «слоупок». Она исчезает, как только ход переходит к следующему игроку. Время ни на что не влияет, штрафов нет.</p>
+      <p>Когда игрок заканчивает ход, звучит короткий сигнал (тому, чья очередь теперь, — звонче). Когда кто-то становится слоупоком, играет грустный тромбон. Громкость настраивается ползунком в шапке, а кнопка 🔊 выключает звук совсем.</p>
 
       <h3>Конец партии</h3>
       <ul>
@@ -578,8 +592,64 @@ function clockText(s, j) {
   const live = onTurn(s, j);
   return fmtTime((p.time || 0) + (live ? runningMs(s) : 0)) + (live ? " · этот ход " + fmtTime(turnMs(s)) : "");
 }
+// ---------- sound ----------
+let soundOn = load("bukvoed-sound") !== "off", actx = null, master = null, slowPlayed = true;
+let volume = Math.min(100, Math.max(0, +(load("bukvoed-volume") ?? 70) || 0));
+function audio() {
+  if (!actx) {
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; }
+    master = actx.createGain(); master.gain.value = (volume / 100) ** 2 * 1.6; master.connect(actx.destination);
+  }
+  if (actx.state === "suspended") actx.resume().catch(() => {});
+  return actx;
+}
+["pointerdown", "keydown"].forEach(ev => addEventListener(ev, () => { if (soundOn) audio(); }, {capture: true}));
+function note(a, {f, f2, t, d, type = "sine", vol = .2, vib = 0, cut = 0}) {
+  const o = a.createOscillator(), g = a.createGain(); let out = o;
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  if (f2) o.frequency.linearRampToValueAtTime(f2, t + d);
+  if (vib) { const l = a.createOscillator(), lg = a.createGain(); l.frequency.value = 5.5; lg.gain.value = vib; l.connect(lg).connect(o.frequency); l.start(t + d * .25); l.stop(t + d); }
+  if (cut) { const fl = a.createBiquadFilter(); fl.type = "lowpass"; fl.frequency.value = cut; fl.Q.value = 2; o.connect(fl); out = fl; }
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .03);
+  g.gain.setValueAtTime(vol, t + d * .7); g.gain.exponentialRampToValueAtTime(.001, t + d);
+  out.connect(g).connect(master); o.start(t); o.stop(t + d + .05);
+}
+function playSound(kind) {
+  const a = soundOn && volume > 0 && audio(); if (!a || a.state !== "running") return;
+  const t = a.currentTime + .02;
+  if (kind === "turn") { note(a, {f: 587, t, d: .18, type: "triangle"}); note(a, {f: 784, t: t + .14, d: .35, type: "triangle"}); }
+  else if (kind === "myturn") { note(a, {f: 659, t, d: .16, type: "triangle"}); note(a, {f: 880, t: t + .12, d: .16, type: "triangle"}); note(a, {f: 1175, t: t + .24, d: .45, type: "triangle", vol: .16}); }
+  else if (kind === "trombone") {
+    [[233, 0, .42], [220, .45, .42], [208, .9, .42], [196, 1.35, 1.5]].forEach(([f, dt, d], k) =>
+      note(a, {f, f2: f * (k === 3 ? .97 : .985), t: t + dt, d, type: "sawtooth", vol: .16, cut: 900, vib: k === 3 ? 6 : 0}));
+  }
+}
+function setSound(on) {
+  soundOn = on; store("bukvoed-sound", on ? null : "off");
+  const b = $("#sound-btn"); b.textContent = on ? "🔊" : "🔇"; b.setAttribute("aria-pressed", String(on));
+  b.title = on ? "Звук включён" : "Звук выключен";
+  if (on) audio();
+}
+$("#sound-btn").addEventListener("click", () => setSound(!soundOn));
+const volEl = $("#sound-vol"); volEl.value = volume;
+volEl.addEventListener("input", () => {
+  volume = +volEl.value; store("bukvoed-volume", String(volume));
+  if (master) master.gain.value = (volume / 100) ** 2 * 1.6;
+  if (!soundOn && volume > 0) setSound(true);
+});
+volEl.addEventListener("change", () => playSound("turn"));
+setSound(soundOn);
+// Called whenever a new state replaces the old one: beeps when a turn ends.
+function onNewState(prev, next) {
+  if (!prev || !next || prev.status !== "play") return;
+  if (next.status === "play" && next.turn === prev.turn) return;
+  playSound(mode !== "local" && next.status === "play" && next.turn === meIdx() ? "myturn" : "turn");
+}
+
 setInterval(() => {
   if (!G) return;
+  if (G.status === "play" && isSlow(G, G.turn)) { if (!slowPlayed) { slowPlayed = true; playSound("trombone"); } }
+  else if (G.status === "play" && turnMs(G) < SLOW_MS) slowPlayed = false;
   document.querySelectorAll(".clock[data-j]").forEach(el => { el.textContent = clockText(G, +el.dataset.j); });
   document.querySelectorAll(".nmtext[data-j]").forEach(el => {
     const slow = isSlow(G, +el.dataset.j);
@@ -613,7 +683,7 @@ function applyAction(name, pid, args) {
   const s = clone(G);
   const r = ACTIONS[name](s, pid, args || {});
   if (typeof r === "string") return r;
-  s.seq = (s.seq || 0) + 1; G = s;
+  s.seq = (s.seq || 0) + 1; const prev = G; G = s; onNewState(prev, s);
   persist(); broadcast(); render();
   return null;
 }
@@ -696,7 +766,7 @@ function connectHost() {
   c.on("open", () => { c.send({type: "hello", pid: PID, name: myName}); setNet("open"); });
   c.on("data", d => {
     if (!d || typeof d !== "object") return;
-    if (d.type === "state") { G = d.state; online = d.online || []; if (d.now) clockOffset = d.now - Date.now(); render(); }
+    if (d.type === "state") { const prev = G; G = d.state; online = d.online || []; if (d.now) clockOffset = d.now - Date.now(); onNewState(prev, G); render(); }
     else if (d.type === "res") { const r = reqs.get(d.id); if (r) { reqs.delete(d.id); if (d.err) toast(d.err); r(!d.err); } }
   });
   c.on("close", () => { if (hostConn === c) { setNet("lost"); retry(connectHost, 3000); } });
