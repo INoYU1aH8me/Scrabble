@@ -109,6 +109,8 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
 .pl .nm { display: flex; flex-direction: column; min-width: 0; }
 .pl .n1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .pl .n2 { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pl .nmtext.slow { text-decoration: line-through; text-decoration-thickness: 2px; opacity: .7; }
+.pl .slowpoke { color: var(--danger); font-weight: 700; }
 .pl .nm small { font-weight: 400; color: var(--muted); }
 .votebox { border: 2px solid var(--danger); }
 .votebox p { margin: 0; }
@@ -249,7 +251,7 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
       </ul>
 
       <h3>Время</h3>
-      <p>Рядом с каждым игроком видно, сколько всего времени он думал над ходами, а у того, кто ходит сейчас, ещё и время текущего хода. Пока ход на голосовании, часы стоят. Время ни на что не влияет, штрафов нет.</p>
+      <p>Рядом с каждым игроком видно, сколько всего времени он думал над ходами, а у того, кто ходит сейчас, ещё и время текущего хода. Пока ход на голосовании, часы стоят. Если игрок думает над ходом дольше 5 минут, его имя зачёркивается и рядом появляется красная надпись «слоупок». Она исчезает, как только ход переходит к следующему игроку. Время ни на что не влияет, штрафов нет.</p>
 
       <h3>Конец партии</h3>
       <ul>
@@ -388,18 +390,22 @@ function dealStart(s) {
   for (const p of s.players) { p.rack = s.bag.splice(0, RACK); p.score = 0; p.time = 0; }
   s.turn = Math.floor(Math.random() * s.players.length);
   s.status = "play"; s.board = EMPTY; s.passes = 0; s.last = null; s.vote = null; s.log = [{t: "start", p: s.turn}];
-  startClock(s);
+  s.turnAcc = 0; startClock(s);
 }
-// clocks only measure thinking time; nobody is penalised for it
+// clocks only measure thinking time; nobody is penalised for it.
+// turnAcc keeps the current turn's time while a vote pauses the clock
 function stopClock(s) {
   const p = s.players[s.turn];
-  if (s.turnStart && p) p.time = (p.time || 0) + Math.max(0, Date.now() - s.turnStart);
+  if (s.turnStart && p) {
+    const d = Math.max(0, Date.now() - s.turnStart);
+    p.time = (p.time || 0) + d; s.turnAcc = (s.turnAcc || 0) + d;
+  }
   s.turnStart = null;
 }
 function startClock(s) { s.turnStart = s.status === "play" ? Date.now() : null; }
 function nextTurn(s, pi) {
   s.turn = (pi + 1) % s.players.length;
-  startClock(s);
+  s.turnAcc = 0; startClock(s);
 }
 // a proposed move waits on the board until the other players vote on it
 function finishVote(s, ok) {
@@ -562,15 +568,24 @@ function fmtTime(ms) {
   const t = Math.max(0, Math.floor(ms / 1000)), hh = Math.floor(t / 3600), mm = Math.floor(t / 60) % 60, ss = t % 60;
   return (hh ? hh + ":" + String(mm).padStart(2, "0") : mm) + ":" + String(ss).padStart(2, "0");
 }
+const SLOW_MS = 5 * 60 * 1000;
+const runningMs = s => s.turnStart ? Math.max(0, hostNow() - s.turnStart) : 0;
+const onTurn = (s, j) => s.status === "play" && s.turn === j;
+const turnMs = s => (s.turnAcc || 0) + runningMs(s);
+const isSlow = (s, j) => onTurn(s, j) && turnMs(s) > SLOW_MS;
 function clockText(s, j) {
   const p = s.players[j]; if (!p) return "";
-  const running = s.status === "play" && s.turn === j && s.turnStart;
-  const cur = running ? Math.max(0, hostNow() - s.turnStart) : 0;
-  return fmtTime((p.time || 0) + cur) + (running ? " · этот ход " + fmtTime(cur) : "");
+  const live = onTurn(s, j);
+  return fmtTime((p.time || 0) + (live ? runningMs(s) : 0)) + (live ? " · этот ход " + fmtTime(turnMs(s)) : "");
 }
 setInterval(() => {
   if (!G) return;
   document.querySelectorAll(".clock[data-j]").forEach(el => { el.textContent = clockText(G, +el.dataset.j); });
+  document.querySelectorAll(".nmtext[data-j]").forEach(el => {
+    const slow = isSlow(G, +el.dataset.j);
+    el.classList.toggle("slow", slow);
+    if (el.nextElementSibling) el.nextElementSibling.hidden = !slow;
+  });
 }, 1000);
 const roomUrl = code => location.origin + location.pathname + "?room=" + code;
 const peerOk = () => typeof window.Peer === "function";
@@ -962,7 +977,10 @@ function playersPanel(s, mi) {
   s.players.forEach((p, j) => list.append(h("div", {class: "pl" + (s.status === "play" && s.turn === j ? " turn" : "")},
     avatar(s, j),
     h("span", {class: "nm"},
-      h("span", {class: "n1"}, playerName(s, j), mode !== "local" && j === mi ? h("small", {}, " · вы") : null),
+      h("span", {class: "n1"},
+        h("span", {class: "nmtext" + (isSlow(s, j) ? " slow" : ""), "data-j": j}, playerName(s, j)),
+        h("span", {class: "slowpoke", hidden: !isSlow(s, j)}, " слоупок"),
+        mode !== "local" && j === mi ? h("small", {}, " · вы") : null),
       h("span", {class: "n2"}, "фишек: " + p.rack.length + " · время ", h("span", {class: "clock", "data-j": j}, clockText(s, j)))),
     h("span", {class: "sc"}, p.score))));
   return h("div", {class: "panel stack"}, list, h("div", {class: "bagline"}, h("span", {}, "В мешке"), h("b", {}, s.bag.length + " фиш.")));
