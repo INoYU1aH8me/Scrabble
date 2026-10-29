@@ -118,6 +118,13 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
 .pl .n2 { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .pl .nmtext.slow { text-decoration: line-through; text-decoration-thickness: 2px; opacity: .7; }
 .pl .slowpoke { color: var(--danger); font-weight: 700; }
+.pl .pen { color: var(--danger); font-weight: 700; }
+.lim-on { flex-direction: row; color: var(--ink); font-size: 14px; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.lim-on input { width: 18px; height: 18px; accent-color: var(--accent); }
+.lim-row { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px; color: var(--muted); }
+.lim-f { flex-direction: row; align-items: center; gap: 6px; font-weight: 400; }
+.lim .field.num { width: 64px; padding: 6px 8px; text-align: center; }
+.lim .field.num:disabled { opacity: .5; }
 .pl .nm small { font-weight: 400; color: var(--muted); }
 .votebox { border: 2px solid var(--danger); }
 .votebox p { margin: 0; }
@@ -264,7 +271,8 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; f
       </ul>
 
       <h3>Время</h3>
-      <p>Рядом с каждым игроком видно, сколько всего времени он думал над ходами, а у того, кто ходит сейчас, ещё и время текущего хода. Пока ход на голосовании, часы стоят. Если игрок думает над ходом дольше 5 минут, его имя зачёркивается и рядом появляется красная надпись «слоупок». Она исчезает, как только ход переходит к следующему игроку. Время ни на что не влияет, штрафов нет.</p>
+      <p>Рядом с каждым игроком видно, сколько всего времени он думал над ходами, а у того, кто ходит сейчас, ещё и время текущего хода. Пока ход на голосовании, часы стоят. Если игрок думает над ходом дольше 5 минут, его имя зачёркивается и рядом появляется красная надпись «слоупок». Она исчезает, как только ход переходит к следующему игроку. Само по себе время ни на что не влияет.</p>
+      <p><b>Ограничение времени</b> включается при создании стола (или хозяином до начала партии). По умолчанию: если ход длится дольше 3 минут, у игрока снимается 1 очко каждые 5 секунд. Время, число очков и интервал можно поменять. Набежавший штраф виден красным рядом с часами и вычитается из счёта, когда ход заканчивается. Пока ход на голосовании, штраф не растёт; если слово отклонили, отсчёт продолжается с того же места. Счёт может уйти в минус.</p>
       <p>Когда игрок заканчивает ход, звучит короткий сигнал (тому, чья очередь теперь, — звонче). Когда кто-то становится слоупоком, играет грустный тромбон. Громкость настраивается ползунком в шапке, а кнопка 🔊 выключает звук совсем.</p>
 
       <h3>Конец партии</h3>
@@ -395,18 +403,36 @@ function evaluate(board, placed) {
 }
 
 // ---------- game rules (pure, run by the host or the local device) ----------
-function newGameState(local) {
+function newGameState(local, limit) {
   return {v: 2, local: !!local, created: Date.now(), host: null, status: "lobby", players: [],
-    bag: [], board: EMPTY, turn: 0, passes: 0, log: [], last: null, seq: 0};
+    bag: [], board: EMPTY, turn: 0, passes: 0, log: [], last: null, seq: 0, limit: cleanLimit(limit)};
+}
+// optional time limit: once a turn runs past `after` minutes, `pts` points go every `every` seconds
+function cleanLimit(l) {
+  l = l || {};
+  const n = (v, lo, hi, d) => { v = Math.round(+v); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
+  return {on: !!l.on, after: n(l.after, 0, 60, 3), pts: n(l.pts, 1, 50, 1), every: n(l.every, 1, 300, 5)};
+}
+function penaltyFor(s, ms) {
+  const L = s.limit; if (!L || !L.on) return 0;
+  const over = ms - L.after * 60000;
+  return over < 0 ? 0 : Math.floor(over / (L.every * 1000)) * L.pts;
+}
+// the penalty is settled once, when the turn ends; the clock must already be stopped
+function chargeTurn(s, pi) {
+  const n = penaltyFor(s, s.turnAcc || 0), P = s.players[pi];
+  if (!n) return;
+  P.score -= n; P.pen = (P.pen || 0) + n;
+  s.log.push({t: "pen", p: pi, n});
 }
 function dealStart(s) {
   s.bag = newBag();
-  for (const p of s.players) { p.rack = s.bag.splice(0, RACK); p.score = 0; p.time = 0; }
+  for (const p of s.players) { p.rack = s.bag.splice(0, RACK); p.score = 0; p.time = 0; p.pen = 0; }
   s.turn = Math.floor(Math.random() * s.players.length);
   s.status = "play"; s.board = EMPTY; s.passes = 0; s.last = null; s.vote = null; s.log = [{t: "start", p: s.turn}];
   s.turnAcc = 0; startClock(s);
 }
-// clocks only measure thinking time; nobody is penalised for it.
+// clocks measure thinking time; only the optional limit turns it into a penalty.
 // turnAcc keeps the current turn's time while a vote pauses the clock
 function stopClock(s) {
   const p = s.players[s.turn];
@@ -436,7 +462,7 @@ function finishVote(s, ok) {
   P.rack.push(...drawn); P.score += ev.score; s.board = bStr(ev.board);
   s.last = {p: pi, cells: V.placed.map(x => x.i), words: ev.words.map(w => w.word)};
   s.log.push({t: "move", p: pi, words: ev.words, score: ev.score, bingo: ev.bingo});
-  s.passes = 0;
+  s.passes = 0; chargeTurn(s, pi);
   if (!P.rack.length && !s.bag.length) { s.turn = (pi + 1) % s.players.length; endGame(s, pi); }
   else nextTurn(s, pi);
   trimLog(s);
@@ -471,6 +497,11 @@ const ACTIONS = {
     if (pid !== s.host) return "Начать может только хозяин стола";
     if (s.players.length < 2) return "Нужно хотя бы два игрока";
     dealStart(s);
+  },
+  limit(s, pid, a) {
+    if (s.status !== "lobby") return "Настройки меняются только до начала партии";
+    if (pid !== s.host) return "Настройки меняет хозяин стола";
+    s.limit = cleanLimit(a);
   },
   again(s, pid) {
     if (s.status !== "over") return "Партия ещё идёт";
@@ -520,7 +551,7 @@ const ACTIONS = {
     if (s.status !== "play" || s.turn !== pi) return "Сейчас не ваш ход";
     if (s.vote) return "Ход на голосовании";
     stopClock(s);
-    s.passes++; s.last = null; s.log.push({t: "pass", p: pi});
+    s.passes++; s.last = null; s.log.push({t: "pass", p: pi}); chargeTurn(s, pi);
     if (s.passes >= 2 * s.players.length) endGame(s, null); else nextTurn(s, pi);
     trimLog(s);
   },
@@ -537,7 +568,7 @@ const ACTIONS = {
     s.bag.push(...letters); shuffle(s.bag);
     s.players[pi].rack = r2.concat(drawn);
     stopClock(s);
-    s.passes++; s.last = null; s.log.push({t: "swap", p: pi, n: letters.length});
+    s.passes++; s.last = null; s.log.push({t: "swap", p: pi, n: letters.length}); chargeTurn(s, pi);
     if (s.passes >= 2 * s.players.length) endGame(s, null); else nextTurn(s, pi);
     trimLog(s);
   },
@@ -587,6 +618,22 @@ const runningMs = s => s.turnStart ? Math.max(0, hostNow() - s.turnStart) : 0;
 const onTurn = (s, j) => s.status === "play" && s.turn === j;
 const turnMs = s => (s.turnAcc || 0) + runningMs(s);
 const isSlow = (s, j) => onTurn(s, j) && turnMs(s) > SLOW_MS;
+const fmtScore = n => n < 0 ? "−" + (-n) : String(n);
+const liveScore = (s, j) => fmtScore(s.players[j].score - livePen(s, j));
+const livePen = (s, j) => onTurn(s, j) ? penaltyFor(s, turnMs(s)) : 0;
+const penText = (s, j) => { const n = livePen(s, j); return n ? " · штраф −" + n : ""; };
+let limitPref = (() => { try { return cleanLimit(JSON.parse(load("bukvoed-limit") || "null")); } catch (e) { return cleanLimit(null); } })();
+const limitSummary = L => "после " + L.after + " мин хода −" + L.pts + " очк. каждые " + L.every + " с";
+// the limit editor: on the home screen it edits the saved preference, in the lobby the table itself
+function limitForm(L, onChange, idp, locked) {
+  const num = (k, lo, hi, before, after) => h("label", {class: "lim-f"}, before,
+    h("input", {class: "field num", type: "number", id: idp + k, min: lo, max: hi, step: 1, value: L[k], disabled: locked || !L.on,
+      onchange: e => onChange(cleanLimit({...L, [k]: e.target.value}))}), after);
+  return h("div", {class: "stack lim"},
+    h("label", {class: "lim-on"}, h("input", {type: "checkbox", id: idp + "on", checked: L.on, disabled: locked,
+      onchange: e => onChange(cleanLimit({...L, on: e.target.checked}))}), "Ограничение времени на ход"),
+    h("div", {class: "lim-row"}, num("after", 0, 60, "после", "мин"), num("pts", 1, 50, "снимать по", "очк."), num("every", 1, 300, "каждые", "сек")));
+}
 function clockText(s, j) {
   const p = s.players[j]; if (!p) return "";
   const live = onTurn(s, j);
@@ -651,6 +698,8 @@ setInterval(() => {
   if (G.status === "play" && isSlow(G, G.turn)) { if (!slowPlayed) { slowPlayed = true; playSound("trombone"); } }
   else if (G.status === "play" && turnMs(G) < SLOW_MS) slowPlayed = false;
   document.querySelectorAll(".clock[data-j]").forEach(el => { el.textContent = clockText(G, +el.dataset.j); });
+  document.querySelectorAll(".pen[data-j]").forEach(el => { el.textContent = penText(G, +el.dataset.j); });
+  document.querySelectorAll(".sc[data-j]").forEach(el => { const j = +el.dataset.j; if (G.players[j]) el.textContent = liveScore(G, j); });
   document.querySelectorAll(".nmtext[data-j]").forEach(el => {
     const slow = isSlow(G, +el.dataset.j);
     el.classList.toggle("slow", slow);
@@ -699,7 +748,7 @@ function createRoom() {
   if (!name) { toast("Введите имя"); return; }
   myName = name; store("bukvoed-name", name);
   const code = rand(5, "ABCDEFGHJKLMNPQRSTUVWXYZ23456789");
-  const s = newGameState(false); s.host = PID; s.players.push({id: PID, name, score: 0, rack: []});
+  const s = newGameState(false, limitPref); s.host = PID; s.players.push({id: PID, name, score: 0, rack: []});
   store("bukvoed-host-" + code, JSON.stringify(s));
   try { history.replaceState(null, "", "?room=" + code + location.hash); } catch (e) {}
   startHost(code);
@@ -792,7 +841,7 @@ function startLocal(fresh) {
   let s = null;
   if (!fresh) { try { s = JSON.parse(load("bukvoed-local") || "null"); } catch (e) {} }
   if (!s || s.status === "lobby" || s.v !== 2) {
-    s = newGameState(true);
+    s = newGameState(true, limitPref);
     for (let j = 1; j <= 3; j++) s.players.push({id: "local" + j, name: "Игрок " + j, score: 0, rack: []});
     s.host = "local1"; dealStart(s);
   }
@@ -864,7 +913,10 @@ function homeView() {
     h("div", {class: "row"},
       h("button", {class: "btn", type: "button", onclick: () => startLocal(false)}, hasLocal ? "Продолжить партию" : "Играть на одном экране"),
       hasLocal ? h("button", {class: "btn small", type: "button", onclick: () => startLocal(true)}, "Новая") : null));
-  return h("div", {class: "lobby"}, left, h("div", {class: "stack"}, create, join, local));
+  const settings = h("div", {class: "panel stack"}, h("h3", {}, "Настройки новой партии"),
+    limitForm(limitPref, L => { limitPref = L; store("bukvoed-limit", JSON.stringify(L)); render(); }, "lp-"),
+    h("p", {class: "note"}, "Действуют на новый стол и новую игру на одном экране. Хозяин может поменять их, пока партия не началась."));
+  return h("div", {class: "lobby"}, left, h("div", {class: "stack"}, create, settings, join, local));
 }
 
 function netChip() {
@@ -1039,6 +1091,9 @@ function seatsPanel(s) {
   if (host) row.append(h("button", {class: "btn primary", type: "button", onclick: () => act("start"), disabled: s.players.length < 2}, "Начать партию"));
   if (mine && !host) row.append(h("button", {class: "btn", type: "button", onclick: () => act("leave")}, "Встать из-за стола"));
   if (row.childNodes.length) box.append(row);
+  const L = cleanLimit(s.limit);
+  box.append(host ? limitForm(L, v => { act("limit", v); limitPref = v; store("bukvoed-limit", JSON.stringify(v)); }, "ll-", false)
+    : h("p", {class: "note"}, L.on ? "Ограничение времени: " + limitSummary(L) + "." : "Ограничения времени нет."));
   box.append(h("p", {class: "note"}, host ? "Отправьте друзьям ссылку ниже. Когда они сядут, нажмите «Начать партию». Играть можно и вдвоём." : "Ждём, пока хозяин стола начнёт игру."));
   return h("div", {class: "stack"}, box, h("div", {class: "panel stack"}, h("h3", {}, "Ссылка на стол"), shareBox(), hostNote()));
 }
@@ -1051,16 +1106,18 @@ function playersPanel(s, mi) {
         h("span", {class: "nmtext" + (isSlow(s, j) ? " slow" : ""), "data-j": j}, playerName(s, j)),
         h("span", {class: "slowpoke", hidden: !isSlow(s, j)}, " слоупок"),
         mode !== "local" && j === mi ? h("small", {}, " · вы") : null),
-      h("span", {class: "n2"}, "фишек: " + p.rack.length + " · время ", h("span", {class: "clock", "data-j": j}, clockText(s, j)))),
-    h("span", {class: "sc"}, p.score))));
-  return h("div", {class: "panel stack"}, list, h("div", {class: "bagline"}, h("span", {}, "В мешке"), h("b", {}, s.bag.length + " фиш.")));
+      h("span", {class: "n2"}, "фишек: " + p.rack.length + " · время ", h("span", {class: "clock", "data-j": j}, clockText(s, j)),
+        h("span", {class: "pen", "data-j": j}, penText(s, j)))),
+    h("span", {class: "sc", "data-j": j}, liveScore(s, j)))));
+  return h("div", {class: "panel stack"}, list, h("div", {class: "bagline"}, h("span", {}, "В мешке"), h("b", {}, s.bag.length + " фиш.")),
+    s.limit && s.limit.on ? h("p", {class: "note"}, "Лимит: " + limitSummary(s.limit) + ".") : null);
 }
 function finalPanel(s) {
   const best = Math.max(...s.players.map(p => p.score));
   const win = s.players.map((p, j) => p.score === best ? playerName(s, j) : null).filter(Boolean);
   const canAgain = mode === "local" || s.host === PID;
   return h("div", {class: "panel stack final"}, h("h3", {}, win.length > 1 ? "Ничья: " + win.join(" и ") : "Победа: " + win[0]),
-    h("p", {class: "note"}, "Счёт уже учитывает оставшиеся на руках фишки."),
+    h("p", {class: "note"}, "Счёт уже учитывает оставшиеся на руках фишки" + (s.limit && s.limit.on ? " и штрафы за время." : ".")),
     canAgain ? h("div", {class: "row"}, h("button", {class: "btn primary", type: "button", onclick: () => act("again")}, "Сыграть ещё тем же составом")) :
       h("p", {class: "note"}, "Новую партию может начать хозяин стола."));
 }
@@ -1160,6 +1217,7 @@ function logPanel(s, mi) {
     if (e.t === "move") list.append(h("div", {class: "e"}, h("span", {}, who + ": ", h("span", {class: "w"}, e.words.map(w => w.word).join(", ")), e.bingo ? " (все 7!)" : ""), h("span", {class: "p"}, "+" + e.score)));
     else if (e.t === "pass") list.append(h("div", {class: "e"}, h("span", {}, who + " пропускает ход"), h("span", {class: "p"}, "0")));
     else if (e.t === "swap") list.append(h("div", {class: "e"}, h("span", {}, who + " меняет фишки: " + e.n), h("span", {class: "p"}, "0")));
+    else if (e.t === "pen") list.append(h("div", {class: "e undo"}, h("span", {}, who + ": штраф за время"), h("span", {class: "p"}, "−" + e.n)));
     else if (e.t === "reject") list.append(h("div", {class: "e undo"}, h("span", {}, "Не приняли слово " + who + ": " + e.words.join(", ") + ", ход повторяется"), h("span", {class: "p"}, "0")));
     else if (e.t === "undo") list.append(h("div", {class: "e undo"}, h("span", {}, who + ": оспорен ход игрока " + playerName(s, e.target) + " — " + e.words.join(", ")), h("span", {class: "p"}, "−" + e.score)));
     else if (e.t === "end") list.append(h("div", {class: "e"}, h("span", {}, "Конец партии, расчёт за оставшиеся фишки"), h("span", {class: "p"}, e.adj.map(d => (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d)).join(" / "))));
